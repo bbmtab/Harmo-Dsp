@@ -118,15 +118,22 @@ class FineTunePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         from .graphic_eq import GraphicEQ
+        from .parametric import ParametricTable
         lay = QVBoxLayout(self)
         lay.addWidget(StepHeader(
-            4, "tune", "Fine-tune — 31-band manual EQ (Peace-style)",
-            "👉 What to do: move sliders like Peace. Linked = both speakers together. "
-            "Double-click a slider to reset it. Copy the preview line to Equalizer APO.",
+            4, "tune", "Fine-tune — manual EQ (Peace-style)",
+            "👉 What to do: Graphic tab = 31 sliders (fast). Parametric tab = per-band "
+            "Type + free Fc + Gain + Q (detail). Both are written to Equalizer APO.",
             help_keys=["q_factor", "pre_ringing", "group_delay"],
         ))
+        from PySide6.QtWidgets import QTabWidget
+        self.tabs = QTabWidget()
+        self.tabs.setToolTip("Graphic = fixed ISO bands, quick. Parametric = free frequency + filter type, precise.")
         self.geq = GraphicEQ()
-        lay.addWidget(self.geq, 1)
+        self.peq = ParametricTable()
+        self.tabs.addTab(self.geq, "🎚 Graphic 31-band (fast)")
+        self.tabs.addTab(self.peq, "🧮 Parametric detail (Type/Fc/Gain/Q)")
+        lay.addWidget(self.tabs, 1)
         row = QHBoxLayout()
         self.btn_ab = QPushButton("🔀  A/B: bypass all")
         self.btn_ab.setCheckable(True)
@@ -145,16 +152,20 @@ class FineTunePage(QWidget):
         form.addRow(self.apo_preview)
         lay.addWidget(box)
         self.geq.changed.connect(self._refresh_preview)
+        self.peq.changed.connect(self._refresh_preview)
         self.btn_ab.toggled.connect(self._refresh_preview)
         self._refresh_preview()
 
     def _refresh_preview(self):
         from ..dsp.geq import to_apo_graphic_eq
+        from ..dsp.peq import to_apo_filter_lines
         if self.btn_ab.isChecked():
             self.apo_preview.setPlainText("# bypassed — A/B ON, no correction applied")
             return
         gl, _ = self.geq.gains()
-        self.apo_preview.setPlainText(to_apo_graphic_eq(gl))
+        lines = [to_apo_graphic_eq(gl)]
+        lines.extend(to_apo_filter_lines(self.peq.bands()))
+        self.apo_preview.setPlainText("\n".join(lines))
 
 
 class ExportPage(QWidget):
