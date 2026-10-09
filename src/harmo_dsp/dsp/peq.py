@@ -1,25 +1,48 @@
-"""Parametric EQ core: per-band type + fully editable Fc/Gain/Q.
+"""Parametric EQ core, verified against the official Equalizer APO
+Configuration reference (SourceForge wiki, by Jonas Thedering).
 
-APO Filter line reference (Equalizer APO, GPL project by Jonas Thedering):
-  Filter: ON PK Fc 1000 Hz Gain -3.5 dB Q 1.2
+Verified facts (do not change without re-checking the docs):
+- Filter numbers are NOT interpreted and may be omitted.
+- BP is a real band-pass: NO gain param (unlike DCX2496 BP).
+- NO (notch) takes Fc + optional Q, NO gain.
+- AP (all-pass) takes Fc + Q, NO gain.
+- Shelf base codes are LS / HS. LSC / HSC variants take an optional
+  slope ("LSC x dB") and optional Q. "LS 6dB / 12dB" corner variants
+  take Fc + Gain, no Q.
+- GraphicEQ gains interpolate linearly on the LOG frequency axis.
+- Preamp values on the same channel SUM in dB (>= v0.8).
+- Channel identifiers for stereo: L (1), R (2); "all" = every channel.
+- APO processes config lines top to bottom (order matters vs Peace).
+
 Only the *syntax* is mirrored here; all code is original (MIT).
+Filter DESIGN (which Fc/Gain/Q to use) is our own code.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-# (code used in APO file, human label, needs_gain, needs_q)
-FILTER_TYPES: list[tuple[str, str, bool, bool]] = [
-    ("PK", "Peak (potong/dorong area)", True, True),
-    ("LSC", "Low Shelf (angkat/turun bass)", True, False),
-    ("HSC", "High Shelf (angkat/turun treble)", True, False),
-    ("LP", "Low-Pass (buang treble)", False, False),
-    ("HP", "High-Pass (buang bass/rumble)", False, False),
-    ("NO", "Notch (buang dengung sempit)", False, True),
-    ("BP", "Band-Pass (hanya lolos area)", False, True),
-    ("AP", "All-Pass (putar fase saja)", False, True),
+# code, human label, has_gain, has_q, extra_field
+FILTER_TYPES: list[tuple[str, str, bool, bool, str]] = [
+    ("PK", "Peak (potong/dorong area)", True, True, ""),
+    ("LP", "Low-Pass (buang treble)", False, False, ""),
+    ("LPQ", "Low-Pass + Q (resonansi)", False, True, ""),
+    ("HP", "High-Pass (buang bass/rumble)", False, False, ""),
+    ("HPQ", "High-Pass + Q (resonansi)", False, True, ""),
+    ("BP", "Band-Pass murni (tanpa gain!)", False, True, ""),
+    ("LS", "Low Shelf (bass)", True, False, ""),
+    ("LS 6dB", "Low Shelf 6dB/okt (corner)", True, False, ""),
+    ("LS 12dB", "Low Shelf 12dB/okt (corner)", True, False, ""),
+    ("HS", "High Shelf (treble)", True, False, ""),
+    ("HS 6dB", "High Shelf 6dB/okt (corner)", True, False, ""),
+    ("HS 12dB", "High Shelf 12dB/okt (corner)", True, False, ""),
+    ("LSC", "Low Shelf center-freq + Q", True, True, ""),
+    ("HSC", "High Shelf center-freq + Q", True, True, ""),
+    ("NO", "Notch (buang dengung, tanpa gain!)", False, True, ""),
+    ("AP", "All-Pass (putar fase, tanpa gain!)", False, True, ""),
+    ("Modal", "Modal (koreksi mode ruang + T60)", True, True, "t60"),
 ]
 
-_TYPE_CODES = {c for c, _, _, _ in FILTER_TYPES}
+_TYPE = {c: (g, q) for c, _, g, q, _ in FILTER_TYPES}
+CHANNELS = ("all", "L", "R")
 
 
 @dataclass
@@ -29,18 +52,23 @@ class PeqBand:
     fc: float = 1000.0
     gain: float = 0.0
     q: float = 1.0
+    t60: float = 100.0  # ms, Modal only
+    channel: str = "all"  # all | L | R
 
     def clipped(self) -> "PeqBand":
-        fc = max(10.0, min(24000.0, float(self.fc)))
-        gain = max(-15.0, min(15.0, float(self.gain)))
-        q = max(0.1, min(20.0, float(self.q)))
-        ftype = self.ftype if self.ftype in _TYPE_CODES else "PK"
-        return PeqBand(self.on, ftype, fc, gain, q)
+        ftype = self.ftype if self.ftype in _TYPE else "PK"
+        ch = self.channel if self.channel in CHANNELS else "all"
+        return PeqBand(
+            self.on, ftype,
+            max(10.0, min(24000.0, float(self.fc))),
+            max(-15.0, min(15.0, float(self.gain))),
+            max(0.1, min(20.0, float(self.q))),
+            max(10.0, min(2000.0, float(self.t60))),
+            ch,
+        )
 
 
 def default_bands(n: int = 10) -> list[PeqBand]:
-    """Peace shows ~10 filter rows; default to flat PK at log-spaced Fc."""
-    import math
     bands = []
     for i in range(max(1, n)):
         frac = i / max(1, n - 1)
@@ -53,19 +81,81 @@ def _fmt(fc: float) -> str:
     return str(int(fc)) if float(fc).is_integer() else f"{fc:g}"
 
 
+def band_to_line(b: PeqBand) -> str | None:
+    """One APO Filter line, or None when the band has no audible effect."""
+    b = b.clipped()
+    if not b.on:
+        return None
+    has_gain, has_q = _TYPE[b.ftype]
+    if has_gain and b.gain == 0 and b.ftype in ("PK", "LS", "HS", "LSC", "HSC",
+                                                "LS 6dB", "LS 12dB",
+                                                "HS 6dB", "HS 12dB", "Modal"):
+        return None
+    s = f"Filter: ON {b.ftype} Fc {_fmt(b.fc)} Hz"
+    if has_gain:
+        s += f" Gain {b.gain:g} dB"
+    if has_q and not (b.ftype in ("LS", "HS") and b.q == 1.0):
+        # LS/HS Q is optional; omit default to keep files clean
+        if b.ftype in ("LS", "HS") and b.q == 1.0:
+            pass
+        else:
+            s += f" Q {b.q:g}"
+    if b.ftype == "Modal":
+        s += f" T60 target {b.t60:g} ms"
+    return s
+
+
 def to_apo_filter_lines(bands: list[PeqBand], channel: str = "") -> list[str]:
-    """Render APO 'Filter:' lines, skipping bands that are off or 0-effect PEQ."""
-    lines = []
-    prefix = f"Channel: {channel} " if channel in ("L", "R") else ""
-    for b in (x.clipped() for x in bands):
-        if not b.on:
+    """Flat Filter lines for one channel scope (legacy helper)."""
+    out = []
+    for b in bands:
+        if channel and b.channel not in ("all", channel):
             continue
-        if b.ftype in ("PK", "LSC", "HSC") and b.gain == 0:
-            continue
-        if b.ftype in ("PK", "NO", "BP", "AP"):
-            lines.append(f"{prefix}Filter: ON {b.ftype} Fc {_fmt(b.fc)} Hz Gain {b.gain:g} dB Q {b.q:g}")
-        elif b.ftype in ("LSC", "HSC"):
-            lines.append(f"{prefix}Filter: ON {b.ftype} Fc {_fmt(b.fc)} Hz Gain {b.gain:g} dB")
-        else:  # LP / HP
-            lines.append(f"{prefix}Filter: ON {b.ftype} Fc {_fmt(b.fc)} Hz")
-    return lines
+        line = band_to_line(b)
+        if line is not None:
+            out.append(line)
+    return out
+
+
+def build_speakercorrect(bands: list[PeqBand], preamp_db: float = 0.0,
+                         graphic_l: list[float] | None = None,
+                         graphic_r: list[float] | None = None) -> str:
+    """Full speakercorrect.txt content with per-channel grouping.
+
+    Layout: header -> Preamp -> Channel L block -> Channel R block.
+    Bands with channel 'all' are written into BOTH blocks (APO has no
+    'apply to all' persistence across Channel switches for filters,
+    so duplication is the correct, explicit form).
+    """
+    from .geq import to_apo_graphic_eq
+    L: list[str] = []
+    R: list[str] = []
+
+    def blocks(ch: str) -> list[str]:
+        return L if ch == "L" else R
+
+    for scope in ("L", "R"):
+        g = graphic_l if scope == "L" else graphic_r
+        if g and any(v != 0 for v in g):
+            blocks(scope).append(to_apo_graphic_eq(g))
+        for b in bands:
+            if b.channel not in ("all", scope):
+                continue
+            line = band_to_line(b)
+            if line is not None:
+                blocks(scope).append(line)
+
+    out = [
+        "# speakercorrect.txt — written by Harmo-Dsp (do not hand-edit)",
+        "# Order matters: APO processes top to bottom.",
+        "# If Peace is also installed, keep this Include AFTER peace.txt",
+        "# so speaker correction applies last.",
+        f"Preamp: {preamp_db:g} dB",
+        "",
+        "Channel: L",
+    ]
+    out.extend(L if L else ["# (no L filters)"])
+    out += ["", "Channel: R"]
+    out.extend(R if R else ["# (no R filters)"])
+    out.append("")
+    return "\n".join(out)

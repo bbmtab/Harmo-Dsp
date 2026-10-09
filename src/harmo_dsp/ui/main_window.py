@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         for p in (self.page_import, self.page_target, self.page_auto,
                   self.page_tune, self.page_export):
             self.stack.addWidget(p)
+        self.page_export.set_source(self.page_tune)
         lay.addWidget(self.stack, 1)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
