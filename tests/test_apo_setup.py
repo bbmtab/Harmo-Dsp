@@ -28,3 +28,10 @@ def test_wired_and_peace_states(tmp_path):
 
 def test_official_url_is_sourceforge():
     assert S.OFFICIAL_URL.startswith("https://sourceforge.net/projects/equalizerapo")
+
+
+def test_configurator_candidates_resolve_to_real_exe():
+    cands = S.candidate_configurators(S.find_config_dir())
+    assert cands and cands[0].endswith("Configurator.exe")
+    import os
+    assert os.path.isfile(cands[0])  # real machine, no launch performed

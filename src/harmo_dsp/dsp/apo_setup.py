@@ -9,7 +9,6 @@ Why APO is NEVER bundled (see docs/ASSUMPTIONS.md):
 """
 from __future__ import annotations
 import os
-import subprocess
 
 OFFICIAL_URL = "https://sourceforge.net/projects/equalizerapo/files/"
 CANDIDATE_DIRS = [
@@ -69,18 +68,27 @@ def status(config_dir: str | None) -> tuple[str, str]:
             f"⚠ APO active with other content; ours not Included yet.")
 
 
-def open_configurator(config_dir: str | None) -> bool:
-    """Launch official Configurator.exe (user clicks through, admin+reboot)."""
-    candidates = []
+def candidate_configurators(config_dir: str | None) -> list[str]:
+    """Configurator.exe candidates (pure, testable — no side effects)."""
+    out = []
     if config_dir:
-        candidates.append(os.path.join(os.path.dirname(config_dir),
-                                        "Configurator.exe"))
-    candidates += [r"C:\Program Files\EqualizerAPO\Configurator.exe",
-                   r"C:\Program Files (x86)\EqualizerAPO\Configurator.exe"]
-    for exe in candidates:
+        out.append(os.path.join(os.path.dirname(config_dir),
+                                "Configurator.exe"))
+    out += [r"C:\Program Files\EqualizerAPO\Configurator.exe",
+            r"C:\Program Files (x86)\EqualizerAPO\Configurator.exe"]
+    return out
+
+
+def open_configurator(config_dir: str | None) -> bool:
+    """Launch official Configurator.exe (user clicks through, admin+reboot).
+
+    Uses os.startfile (ShellExecute): Popen CANNOT start admin-manifest
+    executables (WinError 740) and must not be used here.
+    """
+    for exe in candidate_configurators(config_dir):
         try:
             if os.path.isfile(exe):
-                subprocess.Popen([exe])
+                os.startfile(exe)  # noqa: PYC-related n/a — Windows only
                 return True
         except OSError:
             continue
