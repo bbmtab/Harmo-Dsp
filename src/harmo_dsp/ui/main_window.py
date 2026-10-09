@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget,
     QListWidgetItem, QStackedWidget, QToolBar, QComboBox, QLabel,
-    QPushButton, QMessageBox, QCheckBox,
+    QPushButton, QMessageBox, QCheckBox, QSplitter,
 )
 from PySide6.QtCore import Qt
 from . import icons
@@ -49,16 +49,19 @@ class MainWindow(QMainWindow):
         self.btn_help.clicked.connect(self._guide)
         bar.addWidget(self.btn_help)
 
-        # ---- body: nav + pages ----
+        # ---- body: draggable nav + pages (splitter: user can widen nav) ----
         body = QWidget()
         self.setCentralWidget(body)
         lay = QHBoxLayout(body)
+        split = QSplitter(Qt.Horizontal)
         self.nav = QListWidget()
-        self.nav.setMaximumWidth(200)
+        self.nav.setMinimumWidth(150)
+        self.nav.setMaximumWidth(320)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         for key, label in STEPS:
-            QListWidgetItem(label, self.nav)
-        self.nav.setToolTip("Follow steps 1 → 5 in order. Each page tells you what to do.")
-        lay.addWidget(self.nav)
+            item = QListWidgetItem(label, self.nav)
+            item.setToolTip(label)
+        self.nav.setToolTip("Follow steps 1 → 5 in order. Drag the divider to widen this list.")
 
         self.stack = QStackedWidget()
         self.page_import = ImportPage()
@@ -70,7 +73,12 @@ class MainWindow(QMainWindow):
                   self.page_tune, self.page_export):
             self.stack.addWidget(p)
         self.page_export.set_source(self.page_tune)
-        lay.addWidget(self.stack, 1)
+        split.addWidget(self.nav)
+        split.addWidget(self.stack)
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        split.setSizes([190, 890])
+        lay.addWidget(split, 1)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
 

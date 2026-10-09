@@ -94,3 +94,18 @@ def test_unified_band_detail_offscreen():
     g2 = GraphicEQ()
     g2.load_preset(rows)
     assert g2.bands()[12].ftype == "NO"
+
+
+def test_slider_drag_selects_band_synchronously():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.graphic_eq import GraphicEQ
+
+    QApplication.instance() or QApplication([])
+    g = GraphicEQ()
+    assert g._sel == 12
+    g._sliders[20].setValue(50)  # user drags the 2 kHz slider
+    assert g._sel == 20  # detail panel followed immediately
+    assert g.d_gain.value() == 5.0
+    assert "2000" in g.sel_title.text()

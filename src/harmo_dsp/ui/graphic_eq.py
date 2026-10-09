@@ -92,6 +92,8 @@ class GraphicEQ(QWidget):
             fl = QLabel(_band_label(f))
             fl.setAlignment(Qt.AlignCenter)
             fl.setStyleSheet("font-size: 9px; opacity: 0.8;")
+            fl.setToolTip(f"ISO band {f:g} Hz — click to select")
+            fl.mousePressEvent = lambda ev, idx=i: self.select(idx)
             col.addWidget(val)
             col.addWidget(s, 1)
             col.addWidget(fl)
@@ -209,7 +211,13 @@ class GraphicEQ(QWidget):
         self._gain[idx] = g
         self._val_labels[idx].setText(f"{g:+.1f}")
         self._sliders[idx].setToolTip(f"{_band_label(self._fc[idx])} Hz — {g:+.1f} dB (click to select)")
-        if idx == self._sel and not self._updating:
+        # Follow the user's hand: dragging/selecting any slider moves the
+        # detail panel to that band immediately (fully synchronous).
+        if idx != self._sel:
+            self.select(idx)
+            self.changed.emit()
+            return
+        if not self._updating:
             self._updating = True
             try:
                 self.d_gain.setValue(g)
