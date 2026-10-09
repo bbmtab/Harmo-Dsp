@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox,
     QFormLayout, QDoubleSpinBox, QComboBox, QCheckBox, QPlainTextEdit,
-    QHBoxLayout,
+    QHBoxLayout, QFileDialog,
 )
 from .widgets import StepHeader, InfoButton
 
@@ -30,6 +30,7 @@ class ImportPage(QWidget):
         row = QHBoxLayout()
         self.btn_add = QPushButton("📂  Add .txt / .frd / .wav …")
         self.btn_add.setToolTip("Supports REW exports: frequency text (.txt/.frd) or impulse (.wav)")
+        self.btn_add.clicked.connect(self._pick_files)
         row.addWidget(self.btn_add)
         self.log = QPlainTextEdit()
         self.log.setPlaceholderText("No files yet — add your L and R measurements.")
@@ -37,6 +38,22 @@ class ImportPage(QWidget):
         self.log.setMaximumHeight(90)
         lay.addLayout(row)
         lay.addWidget(self.log)
+
+    def _pick_files(self):
+        from ..io.rew import load_rew_file
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Add REW measurement",
+            "", "REW exports (*.txt *.frd *.wav);;All files (*)",
+        )
+        for p in paths:
+            if p.lower().endswith(".wav"):
+                self.log.appendPlainText(f"🎵 {p} — impulse import shows in Target graph (FIR step, TODO)")
+                continue
+            try:
+                m = load_rew_file(p)
+                self.log.appendPlainText(f"✓ {p} — {len(m)} points, {m.frequencies[0]:g}–{m.frequencies[-1]:g} Hz")
+            except Exception as e:  # friendly message, never a traceback popup
+                self.log.appendPlainText(f"⚠ {p} — could not read: {e}")
 
 
 class TargetPage(QWidget):
@@ -100,14 +117,16 @@ class AutoCorrectPage(QWidget):
 class FineTunePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        from .graphic_eq import GraphicEQ
         lay = QVBoxLayout(self)
         lay.addWidget(StepHeader(
-            4, "tune", "Fine-tune (manual)",
-            "👉 What to do: drag points on the graph, or edit the table below. "
-            "Lock a band to keep it. A/B button bypasses everything for comparison.",
+            4, "tune", "Fine-tune — 31-band manual EQ (Peace-style)",
+            "👉 What to do: move sliders like Peace. Linked = both speakers together. "
+            "Double-click a slider to reset it. Copy the preview line to Equalizer APO.",
             help_keys=["q_factor", "pre_ringing", "group_delay"],
         ))
-        lay.addWidget(_placeholder("Draggable EQ bands: Fc / Gain (drag), Q (wheel)"))
+        self.geq = GraphicEQ()
+        lay.addWidget(self.geq, 1)
         row = QHBoxLayout()
         self.btn_ab = QPushButton("🔀  A/B: bypass all")
         self.btn_ab.setCheckable(True)
@@ -117,12 +136,25 @@ class FineTunePage(QWidget):
         row.addWidget(self.btn_ab)
         row.addWidget(self.btn_reopt)
         lay.addLayout(row)
-        box = QGroupBox("🎚 Bands  (PK = peak, LS/HS = shelf, LP/HP = filter)")
+        box = QGroupBox("💾 Equalizer APO preview (auto-updates)")
         form = QFormLayout(box)
-        self.lock_note = QLabel("Table editor connects to DSP core next. Locked bands are never auto-changed.")
-        self.lock_note.setWordWrap(True)
-        form.addRow(self.lock_note)
+        self.apo_preview = QPlainTextEdit()
+        self.apo_preview.setReadOnly(True)
+        self.apo_preview.setMaximumHeight(70)
+        self.apo_preview.setToolTip("Paste this GraphicEQ line into Equalizer APO config")
+        form.addRow(self.apo_preview)
         lay.addWidget(box)
+        self.geq.changed.connect(self._refresh_preview)
+        self.btn_ab.toggled.connect(self._refresh_preview)
+        self._refresh_preview()
+
+    def _refresh_preview(self):
+        from ..dsp.geq import to_apo_graphic_eq
+        if self.btn_ab.isChecked():
+            self.apo_preview.setPlainText("# bypassed — A/B ON, no correction applied")
+            return
+        gl, _ = self.geq.gains()
+        self.apo_preview.setPlainText(to_apo_graphic_eq(gl))
 
 
 class ExportPage(QWidget):

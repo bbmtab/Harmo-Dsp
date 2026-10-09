@@ -6,3 +6,4 @@ build/
 *.spec
 *.egg-info/
 .planning/
+.Synthesis/
