@@ -1,0 +1,123 @@
+"""Main window: left nav + stacked 5-step wizard + Advanced toggle."""
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget,
+    QListWidgetItem, QStackedWidget, QToolBar, QComboBox, QLabel,
+    QPushButton, QMessageBox, QCheckBox,
+)
+from PySide6.QtCore import Qt
+from . import icons
+from .theme import ThemeManager
+from .widgets import ChannelSelector
+from .pages import (
+    ImportPage, TargetPage, AutoCorrectPage, FineTunePage, ExportPage,
+)
+
+STEPS = [
+    ("import", "1  📂  Import"),
+    ("target", "2  🎯  Target"),
+    ("auto", "3  ✨  Auto-correct"),
+    ("tune", "4  🎚  Fine-tune"),
+    ("export", "5  💾  Export"),
+]
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Harmo-Dsp — PC speaker correction (Stereo 2.0 / 2.1)")
+        self.resize(1080, 680)
+
+        self.theme = ThemeManager(self._app())
+        self.theme.apply(ThemeManager.DARK)
+
+        # ---- toolbar: channel + theme + advanced + help ----
+        bar = QToolBar("Main")
+        bar.setMovable(False)
+        self.addToolBar(bar)
+        self.channels = ChannelSelector()
+        bar.addWidget(self.channels)
+        bar.addSeparator()
+        self.btn_theme = QPushButton("🌗  Dark / Light")
+        self.btn_theme.setToolTip("Switch between dark and light theme")
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        bar.addWidget(self.btn_theme)
+        self.adv = QCheckBox("Advanced mode")
+        self.adv.setToolTip("Shows extra expert settings. Wizard is enough for most users.")
+        bar.addWidget(self.adv)
+        self.btn_help = QPushButton("❓  Guide")
+        self.btn_help.setToolTip("Open the 5-step guide")
+        self.btn_help.clicked.connect(self._guide)
+        bar.addWidget(self.btn_help)
+
+        # ---- body: nav + pages ----
+        body = QWidget()
+        self.setCentralWidget(body)
+        lay = QHBoxLayout(body)
+        self.nav = QListWidget()
+        self.nav.setMaximumWidth(200)
+        for key, label in STEPS:
+            QListWidgetItem(label, self.nav)
+        self.nav.setToolTip("Follow steps 1 → 5 in order. Each page tells you what to do.")
+        lay.addWidget(self.nav)
+
+        self.stack = QStackedWidget()
+        self.page_import = ImportPage()
+        self.page_target = TargetPage()
+        self.page_auto = AutoCorrectPage()
+        self.page_tune = FineTunePage()
+        self.page_export = ExportPage()
+        for p in (self.page_import, self.page_target, self.page_auto,
+                  self.page_tune, self.page_export):
+            self.stack.addWidget(p)
+        lay.addWidget(self.stack, 1)
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+
+        # ---- bottom: back / next ----
+        bottom = QVBoxLayout()
+        lay.addLayout(bottom)
+        self.btn_back = QPushButton("◀  Back")
+        self.btn_next = QPushButton("Next  ▶")
+        self.btn_back.clicked.connect(self._back)
+        self.btn_next.clicked.connect(self._next)
+        bottom.addStretch(1)
+        bottom.addWidget(self.btn_back)
+        bottom.addWidget(self.btn_next)
+        self._refresh_nav_buttons()
+
+        self.statusBar().showMessage(
+            "v1: Stereo 2.0 / 2.1 only  •  5.1 / 7.1 / Headphone = Future (TODO)  •  All processing local, no upload"
+        )
+
+    def _app(self):
+        from PySide6.QtWidgets import QApplication
+        return QApplication.instance()
+
+    def _toggle_theme(self):
+        mode = self.theme.toggle()
+        self.statusBar().showMessage(f"Theme: {mode}", 2000)
+
+    def _guide(self):
+        QMessageBox.information(
+            self, "How to use Harmo-Dsp (2 minutes)",
+            "1 📂 Import: add REW .txt/.frd or .wav for L and R\n"
+            "2 🎯 Target: pick Flat or a slight tilt\n"
+            "3 ✨ Auto-correct: press Calculate\n"
+            "4 🎚 Fine-tune: drag bands, lock what you like\n"
+            "5 💾 Export: write file for Equalizer APO\n\n"
+            "Hover anything for a tooltip. Press ❓ for details.\n"
+            "v1 = Stereo 2.0 / 2.1 only.",
+        )
+
+    def _back(self):
+        self.nav.setCurrentRow(max(0, self.nav.currentRow() - 1))
+        self._refresh_nav_buttons()
+
+    def _next(self):
+        self.nav.setCurrentRow(min(self.stack.count() - 1, self.nav.currentRow() + 1))
+        self._refresh_nav_buttons()
+
+    def _refresh_nav_buttons(self):
+        r = self.nav.currentRow()
+        self.btn_back.setEnabled(r > 0)
+        self.btn_next.setEnabled(r < self.stack.count() - 1)

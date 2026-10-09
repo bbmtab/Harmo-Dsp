@@ -1,10 +1,17 @@
-"""Harmo-Dsp entry point (MVP placeholder)."""
-
-from harmo_dsp import __version__
+"""Harmo-Dsp entry point — launches modern GUI (light/dark)."""
+import sys
 
 
 def main() -> None:
-    print(f"Harmo-Dsp {__version__} — GUI placeholder, build via GHA")
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.main_window import MainWindow
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("Harmo-Dsp")
+    app.setOrganizationName("Harmo-Dsp")
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
