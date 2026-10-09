@@ -49,6 +49,94 @@ class ImportPage(QWidget):
         lay.addLayout(row)
         lay.addWidget(self.log)
 
+        meas = QGroupBox("🎙 Guided measurement (Dirac-style: sweep → record → IR)")
+        mform = QFormLayout(meas)
+        self.m_out = QComboBox()
+        self.m_in = QComboBox()
+        self.m_hint = QLabel("")
+        self.m_hint.setWordWrap(True)
+        mrow = QHBoxLayout()
+        self.m_ch = QComboBox()
+        self.m_ch.addItems(["L", "R", "Sub"])
+        self.m_ch.setToolTip("Which speaker plays the sweep now")
+        self.m_pos = QDoubleSpinBox()
+        self.m_pos.setRange(1, 8)
+        self.m_pos.setDecimals(0)
+        self.m_pos.setToolTip("Mic position number (measure 1–3 per speaker)")
+        self.m_dur = QComboBox()
+        self.m_dur.addItems(["3 s", "5 s", "8 s"])
+        self.m_dur.setCurrentText("5 s")
+        mrow.addWidget(QLabel("Speaker:"))
+        mrow.addWidget(self.m_ch)
+        mrow.addWidget(QLabel("Pos:"))
+        mrow.addWidget(self.m_pos)
+        mrow.addWidget(QLabel("Sweep:"))
+        mrow.addWidget(self.m_dur)
+        mform.addRow(mrow)
+        mform.addRow("Output:", self.m_out)
+        mform.addRow("Input (mic):", self.m_in)
+        brow = QHBoxLayout()
+        self.btn_level = QPushButton("🔊 Check levels")
+        self.btn_level.setToolTip("Record 1 s, report peak/RMS + OK/too loud/too quiet")
+        self.btn_level.clicked.connect(self._check_levels)
+        self.btn_measure = QPushButton("● Measure now")
+        self.btn_measure.setToolTip("Play sweep on the chosen speaker, record mic, store IR")
+        self.btn_measure.clicked.connect(self._measure_once)
+        brow.addWidget(self.btn_level)
+        brow.addWidget(self.btn_measure)
+        mform.addRow(brow)
+        mform.addRow(self.m_hint)
+        lay.addWidget(meas)
+        self._refresh_devices()
+
+    def _refresh_devices(self):
+        from ..io.audio import available, devices
+        if not available():
+            self.m_hint.setText("⚠ sounddevice not installed → measurement disabled. "
+                                "Install: pip install sounddevice (everything else works).")
+            self.btn_level.setEnabled(False)
+            self.btn_measure.setEnabled(False)
+            return
+        outs, ins = devices()
+        self.m_out.addItems(outs or ["(no output device)"])
+        self.m_in.addItems(ins or ["(no input device)"])
+        self.m_hint.setText("Quiet room, mic at ear position, one speaker at a time.")
+
+    def _check_levels(self):
+        from ..io.audio import record_only
+        from ..dsp.measure import level_dbfs, level_verdict
+        try:
+            x = record_only(48000, self.m_in.currentText(), 1.0)
+            pk, rms = level_dbfs(x)
+            self.log.appendPlainText(f"Levels: peak {pk:.1f} dBFS, RMS {rms:.1f} — {level_verdict(pk, rms)}")
+        except Exception as e:
+            self.log.appendPlainText(f"⚠ Level check failed: {e}")
+
+    def _measure_once(self):
+        from ..io.audio import play_rec
+        from ..dsp.measure import log_sweep, deconvolve, level_dbfs
+        dur = int(self.m_dur.currentText().split()[0])
+        fs = 48000
+        try:
+            sweep = log_sweep(fs, dur)
+            self.log.appendPlainText(f"● Playing {dur}s sweep on {self.m_ch.currentText()}… stay quiet.")
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            rec = play_rec(sweep, fs, self.m_out.currentText(),
+                           self.m_in.currentText(), dur + 2.0)
+            ir = deconvolve(rec, sweep, fs, ir_len=fs * 2)
+            pk, _ = level_dbfs(rec)
+            key = (self.m_ch.currentText(), int(self.m_pos.value()) - 1)
+            win = self.window()
+            sess = getattr(win, "session", None)
+            if sess is not None:
+                sess.setdefault("ir", {})[key] = (fs, ir)
+            self.log.appendPlainText(
+                f"✓ IR {key[0]} pos {key[1] + 1}: {len(ir)} samples @ {fs} Hz "
+                f"(rec peak {pk:.1f} dBFS). Step 3 FIR + time-align unlocked.")
+        except Exception as e:
+            self.log.appendPlainText(f"⚠ Measurement failed: {e}")
+
     def set_target(self, tune_page):
         self._tune = tune_page
 
@@ -107,10 +195,14 @@ class ImportPage(QWidget):
                     sess = getattr(win, "session", None)
                     if sess is not None:
                         store = sess.setdefault("ir", {})
-                        ch = "L" if "L" not in store else "R"
-                        store[ch] = (fs, x)
+                        have_l = any(k == "L" or (isinstance(k, tuple) and k[0] == "L")
+                                     for k in store)
+                        ch = "R" if have_l else "L"
+                        n_same = sum(1 for k in store if k == ch or (
+                            isinstance(k, tuple) and k[0] == ch))
+                        store[(ch, n_same)] = (fs, x)
                         self.log.appendPlainText(
-                            f"🎵 {p} → IR channel {ch} ({fs} Hz, {len(x)} samples). "
+                            f"🎵 {p} → IR {ch} pos {n_same + 1} ({fs} Hz, {len(x)} samples). "
                             f"Phase correction (Step 3 FIR) unlocked.")
                     else:
                         self.log.appendPlainText(f"🎵 {p} — ({fs} Hz, session unavailable)")
@@ -183,7 +275,18 @@ class AutoCorrectPage(QWidget):
 
         fir = QGroupBox("🌀 Phase correction — FIR (Dirac/rePhase-chasing, experimental)")
         fform = QFormLayout(fir)
-        fform.addRow(QLabel("Needs IR (.wav) from Step 1. Magnitude-only → minimum-phase path."))
+        fform.addRow(QLabel("Needs IR (.wav or guided measurement) from Step 1."))
+        chrow = QHBoxLayout()
+        self.fir_ch = QComboBox()
+        self.fir_ch.addItems(["L", "R"])
+        self.fir_ch.setToolTip("Design channel: per-speaker FIR (Dirac-style). Run once per channel.")
+        self.btn_align = QPushButton("⏱ Auto time-align L/R/Sub")
+        self.btn_align.setToolTip("Measure onsets from session IRs, delay early channels up to the latest (APO Delay). Fills Step 5 delays.")
+        self.btn_align.clicked.connect(self._auto_align)
+        chrow.addWidget(QLabel("Design for:"))
+        chrow.addWidget(self.fir_ch)
+        chrow.addWidget(self.btn_align)
+        fform.addRow(chrow)
         self.fir_taps = QComboBox()
         self.fir_taps.addItems(["1024", "2048", "4096", "8192", "16384"])
         self.fir_taps.setCurrentText("4096")
@@ -213,38 +316,80 @@ class AutoCorrectPage(QWidget):
         fform.addRow(self.fir_metrics)
         lay.addWidget(fir)
 
+    def _session_irs(self, ch: str | None = None):
+        """Session IRs as {key: (fs, x)}, filtered by channel; legacy plain
+        keys ('L') and tuple keys (('L', pos)) both accepted."""
+        win = self.window()
+        sess = getattr(win, "session", {}) or {}
+        store = sess.get("ir", {})
+        out = {}
+        for k, v in store.items():
+            kk = k[0] if isinstance(k, tuple) else k
+            if ch is None or kk == ch:
+                out[k] = v
+        return out, sess
+
+    def _auto_align(self):
+        from ..dsp.align import estimate_delays, align_delays
+        irs, _ = self._session_irs()
+        # one IR per channel: prefer position 0
+        per_ch: dict[str, tuple[int, object]] = {}
+        for k, v in irs.items():
+            ch = k[0] if isinstance(k, tuple) else k
+            pos = k[1] if isinstance(k, tuple) else 0
+            if ch not in per_ch or pos == 0:
+                per_ch[ch] = v
+        if len(per_ch) < 2:
+            self.fir_metrics.setText("⏱ Need IRs for 2+ channels (measure L and R in Step 1).")
+            return
+        try:
+            rel = estimate_delays(per_ch)
+            apo = align_delays(per_ch)
+        except ValueError as e:
+            self.fir_metrics.setText(f"⏱ Align failed: {e}")
+            return
+        win = self.window()
+        exp = getattr(win, "page_export", None)
+        if exp is not None:
+            if "L" in apo:
+                exp.delay_l.setValue(round(apo["L"], 2))
+            if "R" in apo:
+                exp.delay_r.setValue(round(apo["R"], 2))
+        order = ", ".join(f"{c}: onset {rel[c]:.2f}ms → delay {apo[c]:.2f}ms"
+                          for c in sorted(rel))
+        sub = f" (Sub offset {apo['Sub']:.2f}ms — verify by ear: bass may redirect after APO)" if "Sub" in apo else ""
+        self.fir_metrics.setText(f"⏱ Time-aligned (ref = latest onset). {order}.{sub}")
+
     def _gen_fir(self):
         from PySide6.QtWidgets import QMessageBox
         from ..dsp.fir import design_speaker_fir, FirParams, save_fir_wav
         win = self.window()
         sess = getattr(win, "session", {}) or {}
-        irs = sess.get("ir", {})
+        ch = self.fir_ch.currentText()
+        irs, _ = self._session_irs(ch)
         if not irs:
-            QMessageBox.information(self, "FIR", "Import impulse response (.wav) in Step 1 first.\nMagnitude-only data stays minimum-phase.")
+            QMessageBox.information(self, "FIR", f"No IR for channel {ch} yet.\nMeasure it in Step 1 (guided or .wav import).")
             return
         fs_set = {fs for fs, _ in irs.values()}
         if len(fs_set) != 1:
             QMessageBox.warning(self, "FIR", f"Mixed sample rates {sorted(fs_set)} — resample outside first.")
             return
         fs = fs_set.pop()
-        positions = [irs[k][1] for k in ("L", "R") if k in irs]
+        positions = [v[1] for v in irs.values()]
         p = FirParams(taps=int(self.fir_taps.currentText()),
                       strength=self.fir_strength.value() / 100.0,
                       phase_below_hz=self.fir_below.value(),
                       boost_max_db=self.max_boost.value())
         rep = design_speaker_fir(positions, fs, p)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save FIR for Convolution", f"harmo-fir-{fs}.wav",
+            self, f"Save FIR for {ch} Convolution", f"harmo-fir-{ch}-{fs}.wav",
             "WAV (*.wav)")
         if not path:
             return
         save_fir_wav(path, rep, normalize=True)
-        sess["fir_wav"] = path
-        exp = getattr(win, "page_export", None)
-        if exp is not None:
-            exp.conv_edit.setText(path)
+        sess.setdefault("fir", {})[ch] = path
         self.fir_metrics.setText(
-            f"taps {rep.taps_n} • latency {rep.latency_ms:.2f} ms • "
+            f"FIR {ch}: taps {rep.taps_n} • latency {rep.latency_ms:.2f} ms • "
             f"pre-ring {rep.pre_ring_db:.1f} dB • peak {rep.peak_db:.1f} dB\n"
             + "\n".join(rep.notes))
 
@@ -489,11 +634,22 @@ class ExportPage(QWidget):
                 conv[int(_fs)] = first  # real rate, not assumed
             except Exception:
                 conv[48000] = first  # assumed rate; Verify warns if device differs
+        conv_per_ch: dict[str, dict[int, str]] = {}
+        sess = getattr(self.window(), "session", {}) or {}
+        for ch, path in (sess.get("fir", {}) or {}).items():
+            if ch in ("L", "R"):
+                try:
+                    from scipy.io.wavfile import read as _wr2
+                    _fs2, _ = _wr2(path)
+                    conv_per_ch[ch] = {int(_fs2): path}
+                except Exception:
+                    conv_per_ch[ch] = {48000: path}
         return ApoOutput(
             preamp_db=preamp, device_pattern=self.device_edit.text().strip(),
             bands=bands, graphic_l=gl, graphic_r=gr,
             delay_ms={"L": self.delay_l.value(), "R": self.delay_r.value()},
-            convolution=conv, custom_footer=self.custom.toPlainText())
+            convolution=conv, conv_per_ch=conv_per_ch,
+            custom_footer=self.custom.toPlainText())
 
     # ---- actions ----
     def _verify(self):

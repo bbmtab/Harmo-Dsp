@@ -54,6 +54,19 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
   energy ratio. No parity claim vs Dirac: Dirac adds guided measurement,
   MIMO/time alignment and years of tuning. Parity needs Gate 3 (real rig).
 
+## MEASUREMENT + TIME-ALIGN (dsp/measure.py, dsp/align.py, io/audio.py)
+- Log sweep (Farina-style) 20 Hz–20 kHz; inverse by EXACT spectral division
+  (zero-forcing + -60 dB floor). A +6 dB/oct time-domain envelope was tried
+  and measured 2x too hot (correct shape is +3 dB/oct); division avoids lore.
+- Onset is SEARCHED (argmax in N-1..N-1+0.5s): fixed-index decapitates real
+  rooms (10–500 ms bulk delay). Found via off-by-one in tests.
+- align_delays() targets the LATEST onset (APO can delay, never advance).
+  Sub caveat from official docs: bass may redirect AFTER APO — verify by ear.
+- sounddevice optional (pip install sounddevice); import/hardware failures
+  degrade to hints, never crashes. GHA installs it (import-only is safe).
+- Honest scope vs Dirac: guided sweep+multiposition+align here; Dirac adds
+  MIMO, per-seat optimisation and room-model fitting (Fase 6+).
+
 ## TODO / GUESSES
 - REW menu names differ per version — parser is tolerant, verify with real exports.
 - .mdat format undocumented — NOT supported, message directs to .txt/.wav.

@@ -29,6 +29,8 @@ class ApoOutput:
     graphic_r: list[float] | None = None
     delay_ms: dict[str, float] = field(default_factory=lambda: {"L": 0.0, "R": 0.0})
     convolution: dict[int, str] = field(default_factory=dict)  # {sampleRate: path}
+    convolution_ch: str = "both"  # both | L | R (manual single-file path)
+    conv_per_ch: dict[str, dict[int, str]] = field(default_factory=dict)  # per-channel FIR
     custom_header: str = ""
     custom_footer: str = ""
 
@@ -88,7 +90,11 @@ def render_speakercorrect(o: ApoOutput) -> str:
             line = band_to_line(b)
             if line is not None:
                 out.append(line)
-        out.extend(conv)
+        per_ch = o.conv_per_ch.get(scope)
+        if per_ch:
+            out.extend(_conv_block(per_ch))  # per-channel FIR wins
+        elif o.convolution_ch in ("both", scope):
+            out.extend(conv)
         out.append("")
     if o.custom_footer.strip():
         out += ["# --- custom footer (verbatim: Copy/VST/anything) ---",

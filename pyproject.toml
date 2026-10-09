@@ -19,6 +19,9 @@ test = [
   "pytest",
   "pytest-qt",
 ]
+measure = [
+  "sounddevice",
+]
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
