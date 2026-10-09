@@ -647,9 +647,17 @@ class ExportPage(QWidget):
         self.btn_reapply = QPushButton("↻  Re-apply Include")
         self.btn_reapply.setToolTip("Peace overwrites config.txt when its Include is missing — this restores ours")
         self.btn_reapply.clicked.connect(lambda: self._write(reapply_only=True))
+        self.btn_setup = QPushButton("📥  Install APO…")
+        self.btn_setup.setToolTip("APO not found: guide + official download (never bundled: GPL driver)")
+        self.btn_setup.clicked.connect(self._show_apo_guide)
+        self.btn_configurator = QPushButton("🔧  Open Configurator…")
+        self.btn_configurator.setToolTip("Tick your speaker device (admin), then reboot — this attaches APO to Windows sound")
+        self.btn_configurator.clicked.connect(self._open_configurator)
         brow.addWidget(self.btn_write)
         brow.addWidget(self.btn_verify)
         brow.addWidget(self.btn_reapply)
+        brow.addWidget(self.btn_setup)
+        brow.addWidget(self.btn_configurator)
         lay.addLayout(brow)
         self.status = QLabel("Equalizer APO status: checking…")
         lay.addWidget(self.status)
@@ -664,12 +672,44 @@ class ExportPage(QWidget):
 
     # ---- helpers ----
     def _detect_apo(self):
-        import os
-        cfg = os.path.join(self.APO_DIR, "config.txt")
-        if os.path.isfile(cfg):
-            self.status.setText(f"✓ Equalizer APO found: {self.APO_DIR}")
-        else:
-            self.status.setText("⚠ Equalizer APO config not found — you can still save the file anywhere.")
+        from ..dsp.apo_setup import find_config_dir, status
+        found = find_config_dir([self.APO_DIR])
+        if found and found != self.APO_DIR:
+            self.APO_DIR = found
+        self._apo_dir = find_config_dir([self.APO_DIR])
+        state, msg = status(self._apo_dir)
+        self._apo_state = state
+        self.status.setText(msg)
+        self.btn_setup.setVisible(state == "missing")
+        self.btn_configurator.setVisible(state in ("idle", "peace-idle"))
+
+    def _show_apo_guide(self):
+        from PySide6.QtWidgets import QMessageBox
+        from ..dsp.apo_setup import OFFICIAL_URL
+        box = QMessageBox(self)
+        box.setWindowTitle("Install Equalizer APO (once)")
+        box.setTextFormat(2)  # rich text
+        box.setText(
+            "Harmo-Dsp only <b>writes text</b> — the sound engine is Equalizer APO "
+            "(free, GPL by Jonas Thedering). It is a <b>driver</b>, so it cannot be "
+            "bundled as a plugin: it needs its own installer + admin + reboot.<br><br>"
+            "1. Download from the <b>official</b> site (check the license there).<br>"
+            "2. Install, run <b>Configurator.exe as admin</b>, tick your speaker.<br>"
+            "3. Reboot, come back here, press Write.<br><br>"
+            f"Official download:<br>{OFFICIAL_URL}")
+        box.addButton("Open official download…", QMessageBox.AcceptRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        if box.exec():
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(OFFICIAL_URL))
+
+    def _open_configurator(self):
+        from PySide6.QtWidgets import QMessageBox
+        from ..dsp.apo_setup import open_configurator
+        if not open_configurator(getattr(self, "_apo_dir", None)):
+            QMessageBox.warning(self, "Configurator",
+                                "Configurator.exe not found — reinstall Equalizer APO first.")
 
     def _pick_conv(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -736,7 +776,8 @@ class ExportPage(QWidget):
         from PySide6.QtWidgets import QMessageBox
         from ..dsp.apo_config import render_speakercorrect, OUR_FILENAME
         from ..dsp.apo_semantics import detect_peace
-        target_dir = self.APO_DIR if os.path.isdir(self.APO_DIR) else ""
+        apo_dir = getattr(self, "_apo_dir", None) or self.APO_DIR
+        target_dir = apo_dir if os.path.isdir(apo_dir) else ""
         if not target_dir or not os.access(target_dir, os.W_OK):
             picked = QFileDialog.getExistingDirectory(self, "Save folder for speakercorrect.txt")
             if not picked:

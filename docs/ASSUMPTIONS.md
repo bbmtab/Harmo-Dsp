@@ -54,6 +54,21 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
   energy ratio. No parity claim vs Dirac: Dirac adds guided measurement,
   MIMO/time alignment and years of tuning. Parity needs Gate 3 (real rig).
 
+## APO PACKAGING (why no bundling, no "APO plugin")
+- Equalizer APO is GPL (Jonas Thedering). Shipping its binary = distributing
+  GPL software (source + copyleft duties) — incompatible with MIT-core goal.
+  A subprocess boundary does NOT avoid distribution duties.
+- Technical: APO is a DRIVER (Audio Processing Object), not a callable
+  library. "Including" it can only mean: user runs official installer +
+  Configurator (admin) + reboot. There is no plugin DLL to embed.
+- Compliant path (implemented, dsp/apo_setup.py): missing APO → guide +
+  user-triggered official download (license seen on source site) → Open
+  Configurator button → status idle/peace-idle/wired. Verified state machine
+  on this machine: installed-but-idle (config.txt comment-only, 0 devices).
+- Device-attach scanning via FxProperties was probed and dropped: our check
+  found only Microsoft property keys; attachment state is Configurator-side
+  and version-dependent — status() reports install+wiring, not attachment.
+
 ## MEASUREMENT + TIME-ALIGN (dsp/measure.py, dsp/align.py, io/audio.py)
 - Log sweep (Farina-style) 20 Hz–20 kHz; inverse by EXACT spectral division
   (zero-forcing + -60 dB floor). A +6 dB/oct time-domain envelope was tried
