@@ -179,3 +179,27 @@ def full_report(config_dir: str | None = None) -> dict:
     return {"installed_version": ver, "reg_pre": pre_ok, "reg_post": post_ok,
             "devices": devs, "attached": attached,
             "config_state": cfg_state, "lines": lines}
+
+
+def build_patched_config(current: str, include_name: str) -> tuple[str, bool]:
+    """Insert/replace our Include line (after peace.txt when present).
+
+    Pure function shared by the GUI and the elevated writer.
+    Returns (new_text, placed_after_peace).
+    """
+    want = f"Include: {include_name}"
+    lines = [ln for ln in current.splitlines()
+             if ln.strip().lower() != want.lower()
+             and "speakercorrect" not in ln.lower()
+             and "harmo-dsp" not in ln.lower()]
+    placed, after_peace = False, False
+    out: list[str] = []
+    for ln in lines:
+        out.append(ln)
+        if (not placed and "peace.txt" in ln.lower()
+                and ln.strip().lower().startswith("include")):
+            out.append(want)
+            placed, after_peace = True, True
+    if not placed:
+        out.append(want)
+    return "\n".join(out) + "\n", after_peace

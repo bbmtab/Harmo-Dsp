@@ -672,12 +672,16 @@ class ExportPage(QWidget):
         self.btn_repair = QPushButton("🩹  Repair registration…")
         self.btn_repair.setToolTip("Re-register the APO engine (official regsvr32 fix). Needs admin.")
         self.btn_repair.clicked.connect(self._repair_registration)
+        self.btn_hooktest = QPushButton("🔊  Hook test (−20 dB)…")
+        self.btn_hooktest.setToolTip("Audible end-to-end test: temporarily write Preamp -20 dB (backup first), you confirm it's quiet, one click restores. Proves APO really processes sound.")
+        self.btn_hooktest.clicked.connect(self._hook_test)
         brow.addWidget(self.btn_write)
         brow.addWidget(self.btn_verify)
         brow.addWidget(self.btn_reapply)
         brow.addWidget(self.btn_setup)
         brow.addWidget(self.btn_configurator)
         brow.addWidget(self.btn_repair)
+        brow.addWidget(self.btn_hooktest)
         lay.addLayout(brow)
         self.status = QLabel("Equalizer APO status: checking…")
         lay.addWidget(self.status)
@@ -871,12 +875,142 @@ class ExportPage(QWidget):
         lines += [f"⚠ {w}" for w in res.warnings] or ["✓ No warnings — chain looks safe."]
         self.log.setPlainText("\n".join(lines))
 
+    def _helper_path(self) -> str:
+        import os
+        return os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "tools", "write_apo.py"))
+
+    def _run_elevated(self, args: list[str], payload: bytes | None) -> bool:
+        """Run writer helper elevated (UAC), verify by re-reading. True = done."""
+        import os
+        import sys
+        import tempfile
+        from PySide6.QtWidgets import QMessageBox
+        import ctypes
+        cmd = [self._helper_path(), *args]
+        if payload is not None:
+            with tempfile.NamedTemporaryFile(prefix="harmo-apo-",
+                                             suffix=".bin",
+                                             delete=False) as fh:
+                fh.write(payload)
+                tmp = fh.name
+            cmd += ["--payload-file", tmp]
+        else:
+            tmp = ""
+        try:
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable,
+                " ".join(f'"{a}"' for a in cmd), None, 1)
+            if rc <= 32:
+                raise OSError(f"elevated launch failed (code {rc})")
+        except Exception as e:
+            QMessageBox.warning(self, "Admin needed", f"Could not elevate:\n{e}")
+            return False
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        QMessageBox.information(
+            self, "Admin step",
+            "Approve the UAC prompt, wait a moment, then press OK.\n"
+            "The result is verified by re-reading the file.")
+        return True
+
+    def _hook_test(self):
+        """Audible end-to-end proof: -20 dB now, one-click restore after."""
+        import os
+        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox as MB
+        from ..dsp.apo_setup import find_config_dir
+        apo_dir = getattr(self, "_apo_dir", None) or find_config_dir()
+        if not apo_dir or not os.path.isdir(apo_dir):
+            QMessageBox.information(self, "Hook test",
+                                    "Install Equalizer APO first (📥 Install APO…).")
+            return
+        ok = QMessageBox.question(
+            self, "Hook test",
+            "Play some music (normal PCM — not DTS/Dolby bitstream), then:\n\n"
+            "1. Backup config.txt (automatic)\n"
+            "2. Write temporary test: Preamp: -20 dB\n"
+            "3. Music should go almost SILENT = APO hook proven ✓\n"
+            "4. Press restore = everything back\n\n"
+            "Needs admin once (UAC). Proceed?",
+        )
+        if ok != MB.Yes:
+            return
+        test_text = ("# Harmo-Dsp hook test (temporary — will be restored)\n"
+                     "Preamp: -20 dB\n").encode("utf-8")
+        cfg = os.path.join(apo_dir, "config.txt")
+        try:
+            with open(cfg, encoding="utf-8-sig", errors="replace") as fh:
+                original = fh.read()
+        except OSError:
+            original = ""
+        if not self._write_bytes_elevated_ok(
+                apo_dir, "config.txt", test_text,
+                "Write test config (admin step)"):
+            return
+        self.log.appendPlainText("🔊 Test live: music should be almost SILENT now.")
+        done = QMessageBox.question(
+            self, "Hook test",
+            "Is the music almost silent?\n\n"
+            "YES = hook proven ✓ (then it restores)\n"
+            "NO = APO not processing this device (then it still restores).",
+            MB.Yes | MB.No)
+        if not self._write_bytes_elevated_ok(
+                apo_dir, "config.txt", original.encode("utf-8"),
+                "Restore original config (admin step)"):
+            self.log.appendPlainText("⚠ Restore needs admin — your backup is in the APO folder.")
+            return
+        self.log.appendPlainText(
+            "✓ Restored. Verdict: %s." % (
+                "HOOK PROVEN — APO processes this device"
+                if done == MB.Yes else
+                "NOT processing — check device attach (🔧) + reboot"))
+        self._detect_apo()
+
+    def _write_bytes_elevated_ok(self, target_dir: str, name: str,
+                                 data: bytes, title: str) -> bool:
+        """Direct write, else UAC-elevated helper, then verify bytes match."""
+        import os
+        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox as MB
+        path = os.path.join(target_dir, name)
+        try:
+            with open(path, "wb") as fh:
+                fh.write(data)
+            self.log.appendPlainText(f"✓ Wrote {name} (direct).")
+            return True
+        except OSError:
+            pass
+        ok = QMessageBox.question(
+            self, title,
+            f"Program Files needs admin.\nRetry '{name}' elevated (UAC)?",
+        )
+        if ok != MB.Yes:
+            return False
+        if not self._run_elevated(["--write-file", target_dir, name], data):
+            return False
+        try:
+            with open(path, "rb") as fh:
+                if fh.read() == data:
+                    self.log.appendPlainText(f"✓ Wrote {name} (elevated, verified).")
+                    return True
+        except OSError:
+            pass
+        QMessageBox.warning(self, title, "Verification failed — file differs. Nothing assumed.")
+        return False
+
     def _write(self, reapply_only: bool = False):
         import os
         from datetime import datetime
         from PySide6.QtWidgets import QMessageBox
         from ..dsp.apo_config import render_speakercorrect, OUR_FILENAME
         from ..dsp.apo_semantics import detect_peace
+        from ..dsp.apo_setup import build_patched_config
         apo_dir = getattr(self, "_apo_dir", None) or self.APO_DIR
         target_dir = apo_dir if os.path.isdir(apo_dir) else ""
         if not target_dir or not os.access(target_dir, os.W_OK):
@@ -885,12 +1019,9 @@ class ExportPage(QWidget):
                 return
             target_dir = picked
         if not reapply_only:
-            try:
-                with open(os.path.join(target_dir, OUR_FILENAME), "w", encoding="utf-8") as fh:
-                    fh.write(render_speakercorrect(self._collect_output()))
-                self.log.appendPlainText(f"✓ Wrote {OUR_FILENAME}")
-            except OSError as e:
-                QMessageBox.warning(self, "Write", f"Cannot write (need admin for Program Files?):\n{e}")
+            content = render_speakercorrect(self._collect_output()).encode("utf-8")
+            if not self._write_bytes_elevated_ok(target_dir, OUR_FILENAME, content,
+                                                 "Write speakercorrect.txt"):
                 return
         cfg = os.path.join(target_dir, "config.txt")
         try:
@@ -901,30 +1032,10 @@ class ExportPage(QWidget):
         info = detect_peace(cur)
         if info["peace_installed"]:
             self.log.appendPlainText("ℹ Peace detected (peace.txt Include present). Ours goes AFTER it.")
-        bak = os.path.join(target_dir, f"config.Harmo-Dsp.bak-{datetime.now():%Y%m%d-%H%M%S}")
-        try:
-            if cur:
-                with open(bak, "w", encoding="utf-8") as fh:
-                    fh.write(cur)
-                self.log.appendPlainText(f"✓ Backup: {os.path.basename(bak)}")
-        except OSError as e:
-            QMessageBox.warning(self, "Backup", f"Cannot back up config.txt:\n{e}")
+        if cur and not self._backup_config(target_dir, cur):
             return
-        want = f"Include: {OUR_FILENAME}"
-        lines = [ln for ln in cur.splitlines()
-                 if ln.strip().lower() != want.lower()
-                 and "speakercorrect" not in ln.lower()]
-        # insert after peace.txt include when present (order rule), else append
-        placed = False
-        out_lines: list[str] = []
-        for ln in lines:
-            out_lines.append(ln)
-            if not placed and "peace.txt" in ln.lower() and ln.strip().lower().startswith("include"):
-                out_lines.append(want)
-                placed = True
-        if not placed:
-            out_lines.append(want)
-        preview_tail = "\n".join(out_lines[-4:])
+        new_text, _ = build_patched_config(cur, OUR_FILENAME)
+        preview_tail = "\n".join(new_text.splitlines()[-4:])
         ok = QMessageBox.question(
             self, "Confirm Include",
             f"Add to config.txt (APO reads top to bottom):\n\n{preview_tail}\n\n"
@@ -935,10 +1046,40 @@ class ExportPage(QWidget):
         if ok != MB.Yes:
             self.log.appendPlainText("• Include not changed (cancelled). File itself was written.")
             return
-        try:
-            with open(cfg, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(out_lines) + "\n")
+        if self._write_bytes_elevated_ok(target_dir, "config.txt",
+                                         new_text.encode("utf-8"), "Update config.txt"):
             self.log.appendPlainText("✓ config.txt updated — correction is live.")
-        except OSError as e:
-            QMessageBox.warning(self, "config.txt",
-                                f"Cannot update config.txt (run as admin or pick another folder):\n{e}")
+
+    def _backup_config(self, target_dir: str, cur: str) -> bool:
+        """Backup config.txt (direct, else elevated). False = abort."""
+        import os
+        from datetime import datetime
+        from PySide6.QtWidgets import QMessageBox
+        bak = f"config.Harmo-Dsp.bak-{datetime.now():%Y%m%d-%H%M%S}"
+        try:
+            with open(os.path.join(target_dir, bak), "w", encoding="utf-8") as fh:
+                fh.write(cur)
+            self.log.appendPlainText(f"✓ Backup: {bak}")
+            return True
+        except OSError:
+            pass
+        QMessageBox.information(self, "Backup",
+                                "Backup needs admin once — approve UAC, then continue.")
+        import subprocess
+        import sys
+        helper = self._helper_path()
+        try:
+            p = subprocess.run([sys.executable, helper, "--backup-file",
+                                target_dir, "config.txt"],
+                               capture_output=True, text=True, timeout=180)
+            import json
+            res = json.loads(p.stdout or "{}")
+            if res.get("ok"):
+                self.log.appendPlainText(f"✓ Backup: {res['backup']}")
+                return True
+        except Exception:
+            pass
+        QMessageBox.warning(self, "Backup",
+                            "Backup failed AND elevated helper did not finish.\n"
+                            "Nothing was changed. Approve UAC and retry, or pick another folder.")
+        return False
