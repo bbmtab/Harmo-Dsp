@@ -60,7 +60,10 @@ def test_full_report_shape_machine_independent():
 
 
 def test_configurator_candidates_resolve_to_real_exe():
+    import os
     cands = S.candidate_configurators(S.find_config_dir())
     assert cands and cands[0].endswith("Configurator.exe")
-    import os
+    if S.find_config_dir() is None:
+        import pytest
+        pytest.skip("APO not installed on this machine (e.g. CI runner)")
     assert os.path.isfile(cands[0])  # real machine, no launch performed
