@@ -82,6 +82,21 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
 - Honest scope vs Dirac: guided sweep+multiposition+align here; Dirac adds
   MIMO, per-seat optimisation and room-model fitting (Fase 6+).
 
+## APO ATTACH (one-click hook, dsp/apo_attach.py + tools/attach_apo.py)
+- Provenance: DeviceAPOInfo.cpp + helpers/RegistryHelper.h READ from the GPL
+  repo (SourceForge, reference clone in L:\Temp, never copied into src/).
+  Interface facts used: slot PKEYs LFX1/GFX2/SFX5/MFX6/EFX7, proc-mode PKEYs +
+  default {C18E2F7E-...}, Child APOs + Version=2 + backup_*.reg pattern,
+  APO GUIDs PRE {EACD2258-...} / POST {EC1CC9CE-...}, SFX/EFX default mode,
+  disableEnhancements removal. Implementation below is original Python.
+- Verified locally: backup_*.reg files (vendor originals), FxProperties
+  layout, Configurator.exe flow, APO install dir. GUIDs cross-checked:
+  repo constant == required slot values (no guessing anywhere).
+- Safety: writes ONLY in elevated helper after UAC + in-app confirm;
+  vendor APOs preserved as child APOs + .reg backup (official mirror);
+  reboot required like official tool; --detach restores. Shell here is
+  non-admin so attach is user-triggered from THEIR desktop session.
+
 ## TODO / GUESSES
 - REW menu names differ per version — parser is tolerant, verify with real exports.
 - .mdat format undocumented — NOT supported, message directs to .txt/.wav.

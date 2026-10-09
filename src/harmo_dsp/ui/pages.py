@@ -597,6 +597,22 @@ class ExportPage(QWidget):
             help_keys=["apo_include", "preamp", "hp_protect", "apo_delay",
                        "apo_device", "apo_conv"],
         ))
+        hook = QGroupBox("🔌 Windows sound hook (attach APO to your speaker)")
+        hlay = QHBoxLayout(hook)
+        self.dev_combo = QComboBox()
+        self.dev_combo.setToolTip("Playback devices + APO attach state. Pick your speaker, press Attach.")
+        self.dev_combo.setMinimumWidth(320)
+        self.btn_dev_refresh = QPushButton("↻")
+        self.btn_dev_refresh.setToolTip("Re-scan devices")
+        self.btn_dev_refresh.clicked.connect(self._refresh_devices)
+        self.btn_attach = QPushButton("🔧 Attach APO…")
+        self.btn_attach.setToolTip("Install APO on this device (official SFX/EFX procedure, backup first).\nNeeds admin (UAC prompt) + reboot — like Configurator.")
+        self.btn_attach.clicked.connect(self._attach_device)
+        hlay.addWidget(self.dev_combo, 1)
+        hlay.addWidget(self.btn_dev_refresh)
+        hlay.addWidget(self.btn_attach)
+        lay.addWidget(hook)
+        self._refresh_devices()
         box = QGroupBox("💾 speakercorrect.txt options (all APO commands)")
         form = QFormLayout(box)
         self.device_edit = QLineEdit()
@@ -669,6 +685,64 @@ class ExportPage(QWidget):
 
     def set_source(self, tune_page):
         self._tune = tune_page
+
+    # ---- Windows sound hook ----
+    def _refresh_devices(self):
+        from ..dsp import apo_attach as A
+        self.dev_combo.clear()
+        try:
+            devs = A.enumerate_devices()
+        except Exception as e:
+            self.dev_combo.addItem(f"(scan failed: {e})", "")
+            return
+        if not devs:
+            self.dev_combo.addItem("(no playback devices / non-Windows)", "")
+            return
+        for d in devs:
+            mark = "✓" if d.attached else "✗"
+            default = " [default]" if d.is_default else ""
+            self.dev_combo.addItem(f"{mark} {d.name}{default}", d.guid)
+
+    def _attach_device(self):
+        import os
+        import sys
+        from PySide6.QtWidgets import QMessageBox
+        guid = self.dev_combo.currentData()
+        if not guid:
+            return
+        label = self.dev_combo.currentText()
+        if label.startswith("✓"):
+            QMessageBox.information(self, "Attach", "APO already attached to this device.")
+            return
+        ok = QMessageBox.question(
+            self, "Attach APO",
+            f"Install Equalizer APO on:\n\n{label}\n\n"
+            "Official SFX/EFX procedure: original sound-card processing is "
+            "backed up first (registry + .reg file) and kept working.\n"
+            "Needs ADMIN (UAC prompt) and a REBOOT afterwards.\n\nProceed?",
+        )
+        from PySide6.QtWidgets import QMessageBox as MB
+        if ok != MB.Yes:
+            return
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "..", "tools", "attach_apo.py")
+        helper = os.path.normpath(helper)
+        try:
+            import ctypes
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, f'"{helper}" --attach "{guid}"',
+                None, 1)
+            if rc <= 32:
+                raise OSError(f"elevated launch failed (code {rc})")
+        except Exception as e:
+            QMessageBox.warning(self, "Attach",
+                                f"Could not start elevated helper:\n{e}\n\n"
+                                "Fallback: use 🔧 Open Configurator… instead.")
+            return
+        QMessageBox.information(
+            self, "Attach",
+            "If UAC asked and the helper finished: REBOOT now (like the "
+            "official tool), then press ↻ to see ✓ attached.")
 
     # ---- helpers ----
     def _detect_apo(self):
