@@ -30,6 +30,35 @@ def test_official_url_is_sourceforge():
     assert S.OFFICIAL_URL.startswith("https://sourceforge.net/projects/equalizerapo")
 
 
+def test_registration_check_against_hkcu_sandbox():
+    import winreg
+    from harmo_dsp.dsp import apo_attach as A
+    root = r"Software\HarmoDspTest\Classes"
+    for guid in (A.PRE_MIX.strip("{}"), A.POST_MIX.strip("{}")):
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                              f"{root}\\AudioEngine\\AudioProcessingObjects\\{{{guid}}}"):
+            pass
+    try:
+        assert S.apo_registration_ok(winreg.HKEY_CURRENT_USER, root) == (True, True)
+        assert S.apo_registration_ok(winreg.HKEY_CURRENT_USER,
+                                      root + r"\Nope") == (False, False)
+    finally:
+        import shutil  # best-effort cleanup (registry has no rmtree)
+        for guid in (A.PRE_MIX.strip("{}"), A.POST_MIX.strip("{}")):
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER,
+                                 f"{root}\\AudioEngine\\AudioProcessingObjects\\{{{guid}}}")
+            except OSError:
+                pass
+
+
+def test_full_report_shape_machine_independent():
+    rep = S.full_report()
+    assert set(rep) >= {"installed_version", "reg_pre", "reg_post",
+                        "devices", "attached", "config_state", "lines"}
+    assert isinstance(rep["lines"], list) and len(rep["lines"]) == 4
+
+
 def test_configurator_candidates_resolve_to_real_exe():
     cands = S.candidate_configurators(S.find_config_dir())
     assert cands and cands[0].endswith("Configurator.exe")

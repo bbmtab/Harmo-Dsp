@@ -93,3 +93,89 @@ def open_configurator(config_dir: str | None) -> bool:
         except OSError:
             continue
     return False
+
+
+def _key_exists(hive, path: str) -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(hive, path, 0, winreg.KEY_READ):
+            return True
+    except OSError:
+        return False
+
+
+def apo_registration_ok(hive=None, classes_root: str = r"SOFTWARE\Classes") -> tuple[bool, bool]:
+    """Engine COM registration present? (pre-mix, post-mix).
+
+    Hive/root injectable so tests use an HKCU sandbox instead of HKLM.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return False, False
+    hive = hive if hive is not None else winreg.HKEY_LOCAL_MACHINE
+    from .apo_attach import PRE_MIX, POST_MIX
+    ok = []
+    for guid in (PRE_MIX.strip("{}"), POST_MIX.strip("{}")):
+        present = (
+            _key_exists(hive, f"{classes_root}\\AudioEngine\\AudioProcessingObjects\\{{{guid}}}")
+            or _key_exists(hive, f"{classes_root}\\CLSID\\{{{guid}}}"))
+        ok.append(present)
+    return ok[0], ok[1]
+
+
+def installed_version() -> str | None:
+    """DisplayVersion from the Uninstall registry (e.g. '1.2.1')."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base, 0,
+                             winreg.KEY_READ) as root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    sub = winreg.EnumKey(root, i)
+                    with winreg.OpenKey(root, sub, 0, winreg.KEY_READ) as k:
+                        try:
+                            name, _ = winreg.QueryValueEx(k, "DisplayName")
+                        except OSError:
+                            continue
+                        if isinstance(name, str) and "equalizer apo" in name.lower():
+                            try:
+                                ver, _ = winreg.QueryValueEx(k, "DisplayVersion")
+                                return str(ver)
+                            except OSError:
+                                return "?"
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return None
+
+
+def full_report(config_dir: str | None = None) -> dict:
+    """4-point machine report: install, engine registration, attach, config."""
+    from . import apo_attach as A
+    cfg = config_dir or find_config_dir()
+    try:
+        devs = A.enumerate_devices()
+    except Exception:
+        devs = []
+    attached = [d for d in devs if d.attached]
+    pre_ok, post_ok = apo_registration_ok()
+    ver = installed_version()
+    cfg_state, cfg_msg = status(cfg)
+    lines = [
+        ("✓ Installed: Equalizer APO " + ver) if ver
+        else "✗ Equalizer APO not installed",
+        "✓ Engine registered (pre+post mix)" if (pre_ok and post_ok)
+        else "✗ Engine registration missing (pre=%s post=%s)" % (pre_ok, post_ok),
+        ("✓ Attached: %d of %d device(s)" % (len(attached), len(devs)))
+        if attached else ("✗ Attached: 0 of %d device(s)" % len(devs)),
+        cfg_msg,
+    ]
+    return {"installed_version": ver, "reg_pre": pre_ok, "reg_post": post_ok,
+            "devices": devs, "attached": attached,
+            "config_state": cfg_state, "lines": lines}

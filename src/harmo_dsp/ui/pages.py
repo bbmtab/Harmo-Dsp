@@ -669,11 +669,15 @@ class ExportPage(QWidget):
         self.btn_configurator = QPushButton("🔧  Open Configurator…")
         self.btn_configurator.setToolTip("Tick your speaker device (admin), then reboot — this attaches APO to Windows sound")
         self.btn_configurator.clicked.connect(self._open_configurator)
+        self.btn_repair = QPushButton("🩹  Repair registration…")
+        self.btn_repair.setToolTip("Re-register the APO engine (official regsvr32 fix). Needs admin.")
+        self.btn_repair.clicked.connect(self._repair_registration)
         brow.addWidget(self.btn_write)
         brow.addWidget(self.btn_verify)
         brow.addWidget(self.btn_reapply)
         brow.addWidget(self.btn_setup)
         brow.addWidget(self.btn_configurator)
+        brow.addWidget(self.btn_repair)
         lay.addLayout(brow)
         self.status = QLabel("Equalizer APO status: checking…")
         lay.addWidget(self.status)
@@ -746,16 +750,39 @@ class ExportPage(QWidget):
 
     # ---- helpers ----
     def _detect_apo(self):
-        from ..dsp.apo_setup import find_config_dir, status
+        from ..dsp.apo_setup import find_config_dir, full_report
         found = find_config_dir([self.APO_DIR])
         if found and found != self.APO_DIR:
             self.APO_DIR = found
         self._apo_dir = find_config_dir([self.APO_DIR])
-        state, msg = status(self._apo_dir)
-        self._apo_state = state
-        self.status.setText(msg)
-        self.btn_setup.setVisible(state == "missing")
-        self.btn_configurator.setVisible(state in ("idle", "peace-idle"))
+        rep = full_report(self._apo_dir)
+        self._apo_state = rep["config_state"]
+        self.status.setText("\n".join(rep["lines"]))
+        self.status.setWordWrap(True)
+        self.btn_setup.setVisible(rep["installed_version"] is None)
+        reg_ok = rep["reg_pre"] and rep["reg_post"]
+        self.btn_repair.setVisible(rep["installed_version"] is not None and not reg_ok)
+        self.btn_configurator.setVisible(rep["config_state"] in ("idle", "peace-idle"))
+
+    def _repair_registration(self):
+        import os
+        import sys
+        from PySide6.QtWidgets import QMessageBox
+        helper = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "tools", "attach_apo.py"))
+        try:
+            import ctypes
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, f'"{helper}" --repair',
+                None, 1)
+            if rc <= 32:
+                raise OSError(f"elevated launch failed (code {rc})")
+        except Exception as e:
+            QMessageBox.warning(self, "Repair", f"Could not start elevated helper:\n{e}")
+            return
+        QMessageBox.information(self, "Repair",
+                                "After the helper finishes, press ↻ — engine lines should turn ✓.")
 
     def _show_apo_guide(self):
         from PySide6.QtWidgets import QMessageBox

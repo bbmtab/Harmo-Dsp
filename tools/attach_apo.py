@@ -78,6 +78,23 @@ def cmd_list():
                       for d in A.enumerate_devices()], indent=1))
 
 
+def cmd_repair():
+    """Official fix (mirrors checkAPORegistration): regsvr32 the APO DLL."""
+    if not is_admin():
+        elevate()
+    import subprocess
+    from harmo_dsp.dsp.apo_setup import find_config_dir
+    d = find_config_dir()
+    dll = os.path.join(os.path.dirname(d), "EqualizerAPO.dll") if d else ""
+    if not dll or not os.path.isfile(dll):
+        print(json.dumps({"ok": False, "error": "EqualizerAPO.dll not found"}))
+        sys.exit(3)
+    rc = subprocess.run(["regsvr32.exe", "/s", dll]).returncode
+    print(json.dumps({"ok": rc == 0, "rc": rc,
+                      "note": "Re-run status check afterwards."}))
+    sys.exit(0 if rc == 0 else 3)
+
+
 def cmd_attach(guid, use_original=True):
     if not is_admin():
         elevate()
@@ -166,11 +183,15 @@ if __name__ == "__main__":
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--attach", metavar="DEVICE-GUID")
     ap.add_argument("--detach", metavar="DEVICE-GUID")
+    ap.add_argument("--repair", action="store_true",
+                    help="re-register EqualizerAPO.dll (official regsvr32 fix)")
     ap.add_argument("--no-original", action="store_true",
                     help="do not chain original vendor APO (not recommended)")
     a = ap.parse_args()
     if a.list:
         cmd_list()
+    elif a.repair:
+        cmd_repair()
     elif a.attach:
         cmd_attach(a.attach, use_original=not a.no_original)
     elif a.detach:
