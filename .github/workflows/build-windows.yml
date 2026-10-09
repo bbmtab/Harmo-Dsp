@@ -27,7 +27,11 @@ jobs:
       - name: GUI smoke test (offscreen)
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
-          pytest -q
+          $env:PYTHONFAULTHANDLER = "1"
+          $env:PYTHONUNBUFFERED = "1"
+          python -m pytest -q --tb=short -rfEX
+          echo "PYTEST_RC=$LASTEXITCODE"
+          exit $LASTEXITCODE
 
       - name: Build onedir (no local build, GHA only)
         run: pyinstaller --onedir --noconfirm --clean --name Harmo-Dsp src/harmo_dsp/__main__.py
