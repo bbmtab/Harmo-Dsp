@@ -491,6 +491,10 @@ class FineTunePage(QWidget):
         lrow.addWidget(self.btn_live)
         lrow.addWidget(self.btn_admin)
         lrow.addWidget(self.preamp_note)
+        self.disk_label = QLabel("○ disk: outdated")
+        self.disk_label.setStyleSheet("font-size: 11px;")
+        self.disk_label.setToolTip("Whether the APO files match what you see. Live ON or Write syncs it.")
+        lrow.addWidget(self.disk_label)
         lrow.addStretch(1)
         lay.addLayout(lrow)
         self._live_timer = None
@@ -530,6 +534,21 @@ class FineTunePage(QWidget):
         exp.ensure_included()
         self.schedule_live_write()
 
+    def auto_enable_live(self):
+        """Live ON at startup when capable (user demand). No dialogs unless
+        the Include line is actually missing (one-time wiring question)."""
+        import os
+        if os.environ.get("HARMO_NO_AUTOLIVE"):
+            return  # tests / headless: never show dialogs
+        if self.btn_live.isChecked():
+            return
+        win = self.window()
+        exp = getattr(win, "page_export", None)
+        if exp is None or not exp.live_capable()[0]:
+            self.btn_admin.setVisible(True)
+            return
+        self.btn_live.setChecked(True)  # fires _live_toggled (setup + write)
+
     def schedule_live_write(self):
         """Debounced auto-write (called on every EQ change while Live is ON)."""
         from PySide6.QtCore import QTimer
@@ -546,7 +565,8 @@ class FineTunePage(QWidget):
         win = self.window()
         exp = getattr(win, "page_export", None)
         if exp is not None and self.btn_live.isChecked():
-            exp.live_write()
+            if exp.live_write():
+                self._set_disk(False)
 
     def collect(self):
         """Data for Export: (preamp, bands, geq_l, geq_r, bypassed)."""
@@ -627,6 +647,7 @@ class FineTunePage(QWidget):
         if getattr(self, "_syncing_preamp", False):
             return
         self.preamp_note.setText("manual")
+        self._set_disk(True)
         self._syncing_preamp = True
         try:
             self.preamp_slider.setValue(int(round(self.preamp.value() * 10)))
@@ -638,12 +659,13 @@ class FineTunePage(QWidget):
         if getattr(self, "_syncing_preamp", False):
             return
         self.preamp_note.setText("manual")
+        self._set_disk(True)
         self._syncing_preamp = True
         try:
             self.preamp.setValue(self.preamp_slider.value() / 10.0)
         finally:
             self._syncing_preamp = False
-        # spin's valueChanged -> _preamp_spin_moved -> preview (guarded, no loop)
+        self._refresh_preview()  # spin's own handler is guarded-muted, so refresh here
 
     def _clip_toggled(self, on: bool):
         self.btn_clip.setText(f"🛡 Anti-clip: {'ON' if on else 'OFF'}")
@@ -655,12 +677,16 @@ class FineTunePage(QWidget):
             self._auto_preamp()  # pin down immediately if needed
         self._refresh_preview()
 
+    def _set_disk(self, dirty: bool):
+        self._disk_dirty = dirty
+        self.disk_label.setText("○ disk: outdated — Write/Live" if dirty else "● disk: synced")
+
     def _eq_changed(self):
         """Any EQ edit: re-pin preamp while the switch is ON, then preview."""
         if getattr(self, "btn_clip", None) is not None and self.btn_clip.isChecked():
             self._auto_preamp()
-        self._refresh_preview()
-        self.schedule_live_write()
+        self._set_disk(True)
+        self._refresh_preview()  # preview schedules the live write (single point)
 
     def _refresh_preview(self):
         from ..dsp.peq import build_speakercorrect
@@ -668,13 +694,22 @@ class FineTunePage(QWidget):
             self.apo_preview.setPlainText("# bypassed — A/B ON, no correction applied")
             if self.pred_curve is not None:
                 self.pred_curve.set_bands([])
+            if not self.btn_live.isChecked() and not getattr(self, "_bypass_hinted", False):
+                self._bypass_hinted = True
+                win = self.window()
+                exp = getattr(win, "page_export", None)
+                if exp is not None:
+                    exp.log.appendPlainText("• Bypass is preview-only while Live is OFF — enable Live or press Write to hear it.")
+            self.schedule_live_write()  # bypass is audible via Live/file too
             return
+        self._bypass_hinted = False
         _, bands, _, _, _ = self.collect()
         txt = build_speakercorrect(bands, self.preamp.value())
         self.apo_preview.setPlainText(txt)
         self.apo_preview.setToolTip("Full speakercorrect.txt preview (Channel L/R blocks). Export writes this file.")
         if self.pred_curve is not None:
             self.pred_curve.set_bands(bands, self.preamp.value())
+        self.schedule_live_write()  # single scheduling point: sliders, preamp, bypass, presets
 
 
 class ExportPage(QWidget):
@@ -1240,6 +1275,8 @@ class ExportPage(QWidget):
         if self._write_bytes_elevated_ok(target_dir, "config.txt",
                                          new_text.encode("utf-8"), "Update config.txt"):
             self.log.appendPlainText("✓ config.txt updated — correction is live.")
+            if self._tune is not None:
+                self._tune._set_disk(False)
 
     def _backup_config(self, target_dir: str, cur: str) -> bool:
         """Backup config.txt (direct, else elevated). False = abort."""

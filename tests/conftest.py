@@ -5,6 +5,9 @@ arbitrary order at interpreter exit -> "Fatal Python error: Aborted"
 after a green run (silent exit-1 in CI).
 """
 import gc
+import os
+
+os.environ.setdefault("HARMO_NO_AUTOLIVE", "1")
 
 import pytest
 

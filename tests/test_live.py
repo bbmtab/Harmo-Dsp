@@ -48,6 +48,46 @@ def test_conv_off_clears_field_and_session_fir():
     w.close()
 
 
+def test_preamp_move_and_bypass_go_live(tmp_path):
+    w, tune, exp = _pages()
+    exp._apo_dir = str(tmp_path)
+    tune.btn_live.blockSignals(True)
+    tune.btn_live.setChecked(True)
+    tune.btn_live.blockSignals(False)
+    # preamp move must schedule a live write (was: sliders only)
+    tune.preamp_slider.setValue(-100)
+    assert tune._live_timer is not None and tune._live_timer.isActive()
+    tune._fire_live_write()
+    txt = (tmp_path / "speakercorrect.txt").read_text(encoding="utf-8")
+    assert "Preamp: -10 dB" in txt
+    assert "synced" in tune.disk_label.text()
+    # bypass must render flat through the same live path
+    tune.btn_ab.setChecked(True)
+    tune._fire_live_write()
+    txt2 = (tmp_path / "speakercorrect.txt").read_text(encoding="utf-8")
+    assert "Filter:" not in txt2 and "Preamp: 0 dB" in txt2
+    w.close()
+
+
+def test_live_auto_enables_when_wired(tmp_path, monkeypatch):
+    w, tune, exp = _pages()
+    exp._apo_dir = str(tmp_path)
+    (tmp_path / "config.txt").write_text(
+        "Include: speakercorrect.txt\n", encoding="utf-8")
+    monkeypatch.delenv("HARMO_NO_AUTOLIVE", raising=False)
+    tune.auto_enable_live()
+    assert tune.btn_live.isChecked()  # silent: Include already present
+    w.close()
+
+
+def test_disk_label_marks_outdated(tmp_path):
+    w, tune, exp = _pages()
+    exp._apo_dir = str(tmp_path)
+    tune.geq._sliders[5].setValue(30)
+    assert "outdated" in tune.disk_label.text()
+    w.close()
+
+
 def test_include_idempotent():
     from harmo_dsp.dsp.apo_setup import build_patched_config
     cur = "# Convolution: Agu 31 20_51_21-filters-48k.wav\nInclude: speakercorrect.txt\n"

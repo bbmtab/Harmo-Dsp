@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(p)
         self.page_export.set_source(self.page_tune)
         self.page_import.set_target(self.page_tune)
+        self.page_tune.auto_enable_live()  # Live ON at start when capable
         split.addWidget(self.nav)
         split.addWidget(self.stack)
         split.setStretchFactor(0, 0)
