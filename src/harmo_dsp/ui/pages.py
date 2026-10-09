@@ -472,7 +472,73 @@ class FineTunePage(QWidget):
         prow.addWidget(self.btn_save_preset)
         prow.addWidget(self.btn_load_preset)
         lay.addLayout(prow)
+        lrow = QHBoxLayout()
+        self.btn_live = QPushButton("⚪ Live to APO: OFF")
+        self.btn_live.setCheckable(True)
+        self.btn_live.setToolTip("Peace-style: every slider move auto-writes speakercorrect.txt (debounced) and APO reloads it live.\nNeeds the APO folder writable (admin) — otherwise use Write or Restart-as-admin.")
+        self.btn_live.toggled.connect(self._live_toggled)
+        self.btn_admin = QPushButton("🔑 Restart as admin")
+        self.btn_admin.setToolTip("Relaunch this app elevated so Live mode can write into Program Files (like Peace, which requires admin).")
+        self.btn_admin.clicked.connect(self._restart_as_admin)
+        self.btn_admin.setVisible(False)
+        lrow.addWidget(self.btn_live)
+        lrow.addWidget(self.btn_admin)
+        lrow.addStretch(1)
+        lay.addLayout(lrow)
+        self._live_timer = None
         self._refresh_preview()
+
+    def _restart_as_admin(self):
+        import sys
+        from PySide6.QtWidgets import QMessageBox
+        try:
+            import ctypes
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, "-m harmo_dsp", None, 1)
+            if rc <= 32:
+                raise OSError(f"elevated relaunch failed (code {rc})")
+            QMessageBox.information(self, "Admin",
+                                    "Elevated copy is starting — close THIS window and use that one.")
+        except Exception as e:
+            QMessageBox.warning(self, "Admin", f"Cannot relaunch elevated:\n{e}")
+
+    def _live_toggled(self, on: bool):
+        from PySide6.QtWidgets import QMessageBox
+        self.btn_live.setText(f"🔴 Live to APO: {'ON' if on else 'OFF'}")
+        if not on:
+            return
+        win = self.window()
+        exp = getattr(win, "page_export", None)
+        if exp is None or not exp.live_capable()[0]:
+            QMessageBox.information(
+                self, "Live",
+                "Live needs the APO folder WRITABLE.\n\n"
+                "Press 🔑 Restart as admin, then enable Live again.\n"
+                "(Same requirement as Peace, which must run as admin.)")
+            self.btn_admin.setVisible(True)
+            self.btn_live.setChecked(False)
+            return
+        # ensure Include once (with its own backup+confirm), then silent writes
+        exp.ensure_included()
+        self.schedule_live_write()
+
+    def schedule_live_write(self):
+        """Debounced auto-write (called on every EQ change while Live is ON)."""
+        from PySide6.QtCore import QTimer
+        if not getattr(self, "btn_live", None) or not self.btn_live.isChecked():
+            return
+        if self._live_timer is None:
+            self._live_timer = QTimer(self)
+            self._live_timer.setSingleShot(True)
+            self._live_timer.setInterval(800)
+            self._live_timer.timeout.connect(self._fire_live_write)
+        self._live_timer.start()  # restart debounce
+
+    def _fire_live_write(self):
+        win = self.window()
+        exp = getattr(win, "page_export", None)
+        if exp is not None and self.btn_live.isChecked():
+            exp.live_write()
 
     def collect(self):
         """Data for Export: (preamp, bands, geq_l, geq_r, bypassed)."""
@@ -570,6 +636,7 @@ class FineTunePage(QWidget):
         if getattr(self, "btn_clip", None) is not None and self.btn_clip.isChecked():
             self._auto_preamp()
         self._refresh_preview()
+        self.schedule_live_write()
 
     def _refresh_preview(self):
         from ..dsp.peq import build_speakercorrect
@@ -699,6 +766,49 @@ class ExportPage(QWidget):
 
     def set_source(self, tune_page):
         self._tune = tune_page
+
+    # ---- Live mode (Peace-style auto-apply) ----
+    def _apo_target_dir(self) -> str:
+        import os
+        apo_dir = getattr(self, "_apo_dir", None) or self.APO_DIR
+        return apo_dir if os.path.isdir(apo_dir) else ""
+
+    def live_capable(self) -> tuple[bool, str]:
+        """(writable, reason). APO auto-reloads files in its config dir."""
+        import os
+        d = self._apo_target_dir()
+        if not d:
+            return False, "APO folder not found"
+        if not os.access(d, os.W_OK):
+            return False, "APO folder not writable (need admin)"
+        return True, d
+
+    def ensure_included(self) -> bool:
+        """One-time Include setup for Live (backup + confirm inside _write)."""
+        self._write(reapply_only=True)
+        return True
+
+    def live_write(self) -> bool:
+        """Silent debounced write of current EQ (Live mode)."""
+        import os
+        from datetime import datetime
+        from ..dsp.apo_config import render_speakercorrect, OUR_FILENAME
+        ok, info = self.live_capable()
+        if not ok:
+            self.log.appendPlainText(f"• Live skipped: {info}.")
+            return False
+        target_dir = info
+        if self._tune is None:
+            return False
+        try:
+            with open(os.path.join(target_dir, OUR_FILENAME), "w", encoding="utf-8") as fh:
+                fh.write(render_speakercorrect(self._collect_output()))
+            self.log.appendPlainText(
+                f"🔴 Live {datetime.now():%H:%M:%S} — APO reloads automatically.")
+            return True
+        except OSError as e:
+            self.log.appendPlainText(f"⚠ Live write failed: {e}")
+            return False
 
     # ---- Windows sound hook ----
     def _refresh_devices(self):
