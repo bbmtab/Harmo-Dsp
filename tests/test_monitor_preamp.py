@@ -60,12 +60,15 @@ def test_preamp_slider_and_switch():
     QApplication.instance() or QApplication([])
     p = FineTunePage()
     assert p.btn_clip.isChecked()  # safe by default
-    assert not p.preamp.isEnabled()  # pinned while ON
+    assert p.preamp.isEnabled() and p.preamp_slider.isEnabled()  # never locked
     p.preamp_slider.setValue(-1)  # programmatic nudge allowed
     p.btn_clip.setChecked(False)
-    assert p.preamp.isEnabled()  # manual mode
     p.preamp_slider.setValue(-100)
     assert abs(p.preamp.value() - (-10.0)) < 1e-9  # slider <-> spin sync
     p.btn_clip.setChecked(True)
-    assert p.preamp.value() == 0.0  # flat EQ auto-pins 0 dB
+    assert p.preamp.value() == -10.0  # flat needs 0, safer manual -10 kept
+    # anti-clip only pulls DOWN, never pushes up past a safer manual value
+    p.preamp_slider.setValue(-120)  # user pins -12 dB manually
+    p.geq._sliders[17].setValue(60)  # +6 dB boost needs only -6
+    assert p.preamp.value() == -12.0  # manual safer value respected
     p.close()

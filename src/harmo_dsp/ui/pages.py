@@ -513,14 +513,19 @@ class FineTunePage(QWidget):
             QMessageBox.warning(self, "Preset", f"Could not load preset:\n{e}")
 
     def _auto_preamp(self):
-        """Anti-clip: worst peak of every APO feature -> preamp. Never boosts."""
+        """Anti-clip: worst peak of every APO feature -> preamp. Never boosts.
+
+        Respects the user's hand: only pulls preamp DOWN to cover the peak,
+        never pushes it up past a safer manual value.
+        """
         from ..dsp.clip_guard import suggest_preamp
         _, bands, _, _, _ = self.collect()
         rep = suggest_preamp(bands)
+        target = min(self.preamp.value(), rep["suggest_db"])
         self._syncing_preamp = True
         try:
-            self.preamp.setValue(rep["suggest_db"])
-            self.preamp_slider.setValue(int(round(rep["suggest_db"] * 10)))
+            self.preamp.setValue(target)
+            self.preamp_slider.setValue(int(round(target * 10)))
         finally:
             self._syncing_preamp = False
         note = "; ".join(rep["notes"][:2])
@@ -552,11 +557,12 @@ class FineTunePage(QWidget):
 
     def _clip_toggled(self, on: bool):
         self.btn_clip.setText(f"🛡 Anti-clip: {'ON' if on else 'OFF'}")
-        manual = not on
-        self.preamp.setEnabled(manual)
-        self.preamp_slider.setEnabled(manual)
+        self.btn_clip.setToolTip(
+            "ON: slider + angka SELALU bisa digeser. Anti-clip hanya menurunkan "
+            "preamp bila hitungan puncak butuh lebih rendah (tak pernah menaikkan "
+            "di atas pilihan manualmu). OFF: manual penuh, cek clipping di Verify.")
         if on:
-            self._auto_preamp()  # pin immediately
+            self._auto_preamp()  # pin down immediately if needed
         self._refresh_preview()
 
     def _eq_changed(self):
