@@ -46,9 +46,12 @@ def test_spectrum_engine_finds_tone():
 def test_monitor_widgets_construct_offscreen():
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
-    assert LiveSpectrum() is not None
+    mon = LiveSpectrum()
+    assert mon is not None
     pc = PredictedCurve()
     pc.set_bands([PeqBand(True, "PK", 1000, 6.0, 1.0)])
+    mon.close()
+    pc.close()
 
 
 def test_preamp_slider_and_switch():
@@ -65,3 +68,4 @@ def test_preamp_slider_and_switch():
     assert abs(p.preamp.value() - (-10.0)) < 1e-9  # slider <-> spin sync
     p.btn_clip.setChecked(True)
     assert p.preamp.value() == 0.0  # flat EQ auto-pins 0 dB
+    p.close()

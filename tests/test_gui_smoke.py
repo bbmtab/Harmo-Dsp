@@ -33,3 +33,4 @@ def test_all_pages_have_guidance():
     for cls in (ImportPage, TargetPage, AutoCorrectPage, FineTunePage, ExportPage):
         p = cls()
         assert p is not None
+        p.close()
