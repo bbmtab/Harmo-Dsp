@@ -72,3 +72,46 @@ def test_preamp_slider_and_switch():
     p.geq._sliders[17].setValue(60)  # +6 dB boost needs only -6
     assert p.preamp.value() == -12.0  # manual safer value respected
     p.close()
+
+
+def test_predicted_curve_includes_preamp():
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.monitor import PredictedCurve, LOG_GRID
+    QApplication.instance() or QApplication([])
+    pc = PredictedCurve()
+    pc.set_bands([], preamp_db=-10.0)
+    import numpy as np
+    _, y = pc.curve.getData()
+    assert abs(float(np.mean(y)) - (-10.0)) < 0.5
+    pc.close()
+
+
+def test_guard_pull_is_announced():
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.pages import FineTunePage
+    QApplication.instance() or QApplication([])
+    p = FineTunePage()
+    p.preamp_slider.setValue(-50)  # real manual move
+    assert p.preamp_note.text() == "manual"
+    p.preamp_slider.setValue(0)  # back to 0 dB by hand
+    p.geq._sliders[17].setValue(120)  # +12 dB boost -> guard must pull
+    assert p.preamp.value() <= -11.9
+    assert "guard pulled" in p.preamp_note.text()
+    p.close()
+
+
+def test_bypass_renders_bit_transparent():
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.main_window import MainWindow
+    from harmo_dsp.dsp.apo_config import render_speakercorrect
+    QApplication.instance() or QApplication([])
+    w = MainWindow()
+    w.page_tune.geq._sliders[17].setValue(60)
+    w.page_tune.btn_ab.setChecked(True)
+    txt = render_speakercorrect(w.page_export._collect_output())
+    assert "Filter:" not in txt and "GraphicEQ:" not in txt
+    assert "Preamp: 0 dB" in txt
+    w.page_tune.btn_ab.setChecked(False)
+    txt2 = render_speakercorrect(w.page_export._collect_output())
+    assert "Filter:" in txt2 or "GraphicEQ:" in txt2  # session kept, restored
+    w.close()

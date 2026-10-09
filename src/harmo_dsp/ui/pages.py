@@ -418,7 +418,7 @@ class FineTunePage(QWidget):
         row = QHBoxLayout()
         self.btn_ab = QPushButton("🔀  A/B: bypass all")
         self.btn_ab.setCheckable(True)
-        self.btn_ab.setToolTip("Compare corrected vs original sound prediction")
+        self.btn_ab.setToolTip("Bypass everything: preview goes flat AND file output (Live/Write) goes bit-transparent.\nSession bands are kept — untoggle to restore.")
         self.btn_reopt = QPushButton("↻  Re-optimize around manual bands")
         self.btn_reopt.setToolTip("Auto-solver respects locked bands")
         row.addWidget(self.btn_ab)
@@ -485,8 +485,12 @@ class FineTunePage(QWidget):
         self.btn_admin.setToolTip("Relaunch this app elevated so Live mode can write into Program Files (like Peace, which requires admin).")
         self.btn_admin.clicked.connect(self._restart_as_admin)
         self.btn_admin.setVisible(False)
+        self.preamp_note = QLabel("")
+        self.preamp_note.setStyleSheet("font-size: 11px; opacity: 0.8;")
+        self.preamp_note.setToolTip("Who set preamp last: you (manual) or the anti-clip guard.")
         lrow.addWidget(self.btn_live)
         lrow.addWidget(self.btn_admin)
+        lrow.addWidget(self.preamp_note)
         lrow.addStretch(1)
         lay.addLayout(lrow)
         self._live_timer = None
@@ -601,13 +605,17 @@ class FineTunePage(QWidget):
         from ..dsp.clip_guard import suggest_preamp
         _, bands, _, _, _ = self.collect()
         rep = suggest_preamp(bands)
-        target = min(self.preamp.value(), rep["suggest_db"])
+        before = self.preamp.value()
+        target = min(before, rep["suggest_db"])
         self._syncing_preamp = True
         try:
             self.preamp.setValue(target)
             self.preamp_slider.setValue(int(round(target * 10)))
         finally:
             self._syncing_preamp = False
+        if target < before - 1e-9:
+            self.preamp_note.setText(
+                f"🛡 guard pulled {before:g} → {target:g} dB (peak {rep['peak_db']:+.1f})")
         note = "; ".join(rep["notes"][:2])
         tip = (f"Worst peak L {rep['peak_l']:+.1f} / R {rep['peak_r']:+.1f} dB "
                f"(filters + GraphicEQ + Convolution). Preamp auto-set {rep['suggest_db']:g} dB."
@@ -618,6 +626,7 @@ class FineTunePage(QWidget):
     def _preamp_spin_moved(self):
         if getattr(self, "_syncing_preamp", False):
             return
+        self.preamp_note.setText("manual")
         self._syncing_preamp = True
         try:
             self.preamp_slider.setValue(int(round(self.preamp.value() * 10)))
@@ -628,6 +637,7 @@ class FineTunePage(QWidget):
     def _preamp_slide_moved(self):
         if getattr(self, "_syncing_preamp", False):
             return
+        self.preamp_note.setText("manual")
         self._syncing_preamp = True
         try:
             self.preamp.setValue(self.preamp_slider.value() / 10.0)
@@ -664,7 +674,7 @@ class FineTunePage(QWidget):
         self.apo_preview.setPlainText(txt)
         self.apo_preview.setToolTip("Full speakercorrect.txt preview (Channel L/R blocks). Export writes this file.")
         if self.pred_curve is not None:
-            self.pred_curve.set_bands(bands)
+            self.pred_curve.set_bands(bands, self.preamp.value())
 
 
 class ExportPage(QWidget):
@@ -973,9 +983,16 @@ class ExportPage(QWidget):
         from ..dsp.apo_config import ApoOutput
         from ..dsp.peq import PeqBand
         if self._tune is None:
-            preamp, bands, gl, gr, _ = 0.0, [], None, None, False
+            preamp, bands, gl, gr, bypassed = 0.0, [], None, None, False
         else:
-            preamp, bands, gl, gr, _ = self._tune.collect()
+            preamp, bands, gl, gr, bypassed = self._tune.collect()
+        if bypassed:
+            # A/B bypass = bit-transparent everywhere (preview, Live, Write).
+            # Session bands are kept in memory; un-bypass restores them.
+            return ApoOutput(preamp_db=0.0, bands=[],
+                             delay_ms={"L": self.delay_l.value(),
+                                       "R": self.delay_r.value()},
+                             custom_footer=self.custom.toPlainText())
         bands = list(bands)
         if self.hp.isChecked():
             bands.append(PeqBand(True, "HP", 50, 0, 1.0, 100.0, "all"))
@@ -1207,10 +1224,12 @@ class ExportPage(QWidget):
         if new_text.strip() == cur.strip():
             self.log.appendPlainText("• Include already present — nothing to confirm.")
             return
+        bypassed = self._tune.collect()[4] if self._tune is not None else False
         preview_tail = "\n".join(new_text.splitlines()[-4:])
         ok = QMessageBox.question(
             self, "Confirm Include",
-            f"Add to config.txt (APO reads top to bottom):\n\n{preview_tail}\n\n"
+            ("⚠ A/B bypass is ON — this writes a FLAT file (no correction).\n\n" if bypassed else "")
+            + f"Add to config.txt (APO reads top to bottom):\n\n{preview_tail}\n\n"
             + ("⚠ Peace overwrites config.txt when its own Include is missing.\n"
                "If ours vanishes later, press Re-apply Include." if info["peace_installed"] else ""),
         )

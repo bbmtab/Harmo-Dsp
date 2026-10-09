@@ -151,10 +151,10 @@ try:
             self.curve = self.plot.plot(pen=pg.mkPen("#00cc66", width=2))
             lay.addWidget(self.plot)
 
-        def set_bands(self, bands) -> None:
+        def set_bands(self, bands, preamp_db: float = 0.0) -> None:
             from ..dsp.clip_guard import chain_response_db
             try:
-                y = chain_response_db(bands, LOG_GRID)
+                y = chain_response_db(bands, LOG_GRID) + float(preamp_db)
                 self.curve.setData(LOG_GRID, y)
             except Exception:
                 pass
