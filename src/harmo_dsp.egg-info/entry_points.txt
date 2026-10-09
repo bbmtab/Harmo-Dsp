@@ -1,2 +1,0 @@
-[console_scripts]
-harmo-dsp = harmo_dsp.__main__:main
