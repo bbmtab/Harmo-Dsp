@@ -546,8 +546,10 @@ class FineTunePage(QWidget):
         exp = getattr(win, "page_export", None)
         if exp is None or not exp.live_capable()[0]:
             self.btn_admin.setVisible(True)
+            self.btn_live.setText("⚪ Live: OFF (need admin)")
             return
         self.btn_live.setChecked(True)  # fires _live_toggled (setup + write)
+        exp.log.appendPlainText("• Live auto-enabled at startup (APO folder writable, Include wired).")
 
     def schedule_live_write(self):
         """Debounced auto-write (called on every EQ change while Live is ON)."""

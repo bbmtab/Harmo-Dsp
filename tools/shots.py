@@ -6,6 +6,7 @@ import os
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("HARMO_NO_AUTOLIVE", "1")  # NEVER touch the real APO dir
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
