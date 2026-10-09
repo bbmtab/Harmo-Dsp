@@ -35,6 +35,7 @@ class VerifyResult:
     preamp_db: dict[str, float] = field(default_factory=lambda: {"L": 0.0, "R": 0.0})
     steps: dict[str, list[Step]] = field(default_factory=lambda: {"L": [], "R": []})
     warnings: list[str] = field(default_factory=list)
+    infos: list[str] = field(default_factory=list)
     includes: list[str] = field(default_factory=list)
 
 
@@ -118,6 +119,11 @@ def verify(text: str, base_dir: str = "") -> VerifyResult:
     res = VerifyResult()
     steps, warnings = parse_apo_text(text, base_dir)
     res.warnings.extend(warnings)
+    # dormant (commented-out) convolution references: user heritage, inactive
+    for raw in text.splitlines():
+        if raw.strip().startswith("#") and "convolution" in raw.lower():
+            res.infos.append(f"Dormant (commented, inactive): {raw.strip()[:80]}")
+            break  # one note suffices
     for s in steps:
         for ch in s.channels:
             if ch not in res.steps:
@@ -158,6 +164,13 @@ def verify(text: str, base_dir: str = "") -> VerifyResult:
         res.warnings.append(
             "Order: speakercorrect is Included BEFORE peace.txt — "
             "Peace filters will apply last. Move ours after peace.txt.")
+    # stacking: convolutions convolve SEQUENTIALLY (old + new multiply)
+    for ch in ("L", "R"):
+        convs = [s.text for s in res.steps.get(ch, []) if s.kind == "convolution"]
+        if len(convs) > 1:
+            res.warnings.append(
+                f"Channel {ch}: {len(convs)} active Convolutions stack "
+                f"(old file + new file multiply). Keep 1 — remove or comment the old one.")
     return res
 
 

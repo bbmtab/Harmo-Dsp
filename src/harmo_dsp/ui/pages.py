@@ -464,12 +464,16 @@ class FineTunePage(QWidget):
         self.btn_clip.setChecked(True)  # safe by default (brief: aman secara default)
         prow.addWidget(self.btn_clip)
         self.btn_save_preset = QPushButton("💾 Save preset…")
-        self.btn_save_preset.setToolTip("Save GEQ + parametric + preamp as JSON (Peace-style preset)")
+        self.btn_save_preset.setToolTip("Save full preset as JSON (all types, channels, T60)")
         self.btn_save_preset.clicked.connect(self._save_preset)
+        self.btn_save_peace = QPushButton("💾 Save .peace…")
+        self.btn_save_peace.setToolTip("Export Peak bands as Peace preset (interchange with Peace; types flatten to PK)")
+        self.btn_save_peace.clicked.connect(self._save_peace)
         self.btn_load_preset = QPushButton("📂 Load preset…")
         self.btn_load_preset.setToolTip("Load a JSON preset")
         self.btn_load_preset.clicked.connect(self._load_preset)
         prow.addWidget(self.btn_save_preset)
+        prow.addWidget(self.btn_save_peace)
         prow.addWidget(self.btn_load_preset)
         lay.addLayout(prow)
         lrow = QHBoxLayout()
@@ -564,6 +568,16 @@ class FineTunePage(QWidget):
         if path:
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
+
+    def _save_peace(self):
+        from ..io.presets import write_peace_preset
+        preamp, bands, _, _, _ = self.collect()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Peace preset", "harmo.peace",
+            "Peace presets (*.peace)")
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(write_peace_preset(preamp, bands))
 
     def _load_preset(self):
         import json
@@ -733,6 +747,9 @@ class ExportPage(QWidget):
         self.btn_verify = QPushButton("🔍  Verify effective chain")
         self.btn_verify.setToolTip("Parse like the APO engine: Channel scope, Includes, preamp sums, boost audit")
         self.btn_verify.clicked.connect(self._verify)
+        self.btn_verify_live = QPushButton("🔍  Verify live config")
+        self.btn_verify_live.setToolTip("Verify the REAL config.txt with includes resolved: stacking, order, Peace, dormant convolutions")
+        self.btn_verify_live.clicked.connect(self._verify_live)
         self.btn_reapply = QPushButton("↻  Re-apply Include")
         self.btn_reapply.setToolTip("Peace overwrites config.txt when its Include is missing — this restores ours")
         self.btn_reapply.clicked.connect(lambda: self._write(reapply_only=True))
@@ -750,6 +767,7 @@ class ExportPage(QWidget):
         self.btn_hooktest.clicked.connect(self._hook_test)
         brow.addWidget(self.btn_write)
         brow.addWidget(self.btn_verify)
+        brow.addWidget(self.btn_verify_live)
         brow.addWidget(self.btn_reapply)
         brow.addWidget(self.btn_setup)
         brow.addWidget(self.btn_configurator)
@@ -989,6 +1007,27 @@ class ExportPage(QWidget):
         lines = [f"L: {len(res.steps.get('L', []))} steps, preamp {res.preamp_db.get('L', 0):g} dB",
                  f"R: {len(res.steps.get('R', []))} steps, preamp {res.preamp_db.get('R', 0):g} dB"]
         lines += [f"⚠ {w}" for w in res.warnings] or ["✓ No warnings — chain looks safe."]
+        lines += [f"ℹ {i}" for i in res.infos]
+        self.log.setPlainText("\n".join(lines))
+
+    def _verify_live(self):
+        """Verify the REAL config.txt (includes resolved): stacking/order/peace."""
+        import os
+        from ..dsp.apo_semantics import verify
+        apo_dir = getattr(self, "_apo_dir", None) or self.APO_DIR
+        cfg = os.path.join(apo_dir, "config.txt") if apo_dir else ""
+        try:
+            with open(cfg, encoding="utf-8-sig", errors="replace") as fh:
+                txt = fh.read()
+        except OSError:
+            self.log.setPlainText("• No live config.txt to verify (APO folder missing?).")
+            return
+        res = verify(txt, base_dir=os.path.dirname(cfg))
+        lines = ["Live config.txt (includes resolved):",
+                 f"L: {len(res.steps.get('L', []))} steps, "
+                 f"R: {len(res.steps.get('R', []))} steps"]
+        lines += [f"⚠ {w}" for w in res.warnings] or ["✓ No warnings."]
+        lines += [f"ℹ {i}" for i in res.infos]
         self.log.setPlainText("\n".join(lines))
 
     def _helper_path(self) -> str:

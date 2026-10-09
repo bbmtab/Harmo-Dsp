@@ -38,6 +38,13 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
 - impulse.txt: raw float-per-line IR (offer WAV conversion for Convolution).
 - impulse.rephase: rePhase settings blob (base64) — NOT decoded (rePhase is
   third-party; its export WAV is the interchange path, not its settings).
+- Peace .peace WRITER mirrors the observed structure (Speakers/General/
+  Frequencies/Gains/Qualities + per-speaker ISO skeletons). LIMITS: non-PK
+  types flatten to PK (base sections carry no type codes); channel splits
+  flatten to All; slider-gain sections were absent from the observed file and
+  are not written. No Peace code exists to copy (closed freeware, verified
+  via project page); GitHub "Peace" repos are unofficial clones of unknown
+  provenance — never a source. Round-trip tested through our own reader.
 
 ## FIR / PHASE (in-house mixed-phase designer, src/harmo_dsp/dsp/fir.py)
 - Split via real cepstrum (fold negative quefrencies). Standard method,

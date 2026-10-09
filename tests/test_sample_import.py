@@ -36,3 +36,14 @@ def test_bw_oct_variant_converts():
     assert len(bands) == 1 and bands[0].ftype == "PK"
     assert abs(bands[0].q - 8.65) < 0.05
     assert any("BW Oct" in n for n in notes)
+
+
+def test_peace_write_round_trips_through_reader():
+    from harmo_dsp.io.presets import write_peace_preset, parse_peace_preset
+    from harmo_dsp.dsp.peq import PeqBand
+    bands = [PeqBand(True, "PK", 72.1, -21.5, 2.0),
+             PeqBand(True, "PK", 1185.0, -11.8, 1.0)]
+    data = parse_peace_preset(write_peace_preset(-2.0, bands))
+    assert data["preamp"] == -2.0
+    assert data["bands"][0] == (72.1, -21.5, 2.0)
+    assert data["bands"][1] == (1185.0, -11.8, 1.0)

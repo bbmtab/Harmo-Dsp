@@ -107,3 +107,44 @@ def parse_peace_preset(text: str) -> dict:
         if m:
             speakers.setdefault(m.group(2), {})[m.group(1).lower()] = v
     return {"preamp": preamp, "bands": bands, "speakers": speakers}
+
+
+def write_peace_preset(preamp: float, bands) -> str:
+    """Write a Peace settings file mirroring the OBSERVED structure.
+
+    Covers: [Speakers] skeleton (All/L/R), [General] PreAmp, base
+    [Frequencies]/[Gains]/[Qualities] as Peak bands (what REW imports
+    look like), per-speaker ISO slider-frequency skeletons.
+    LIMITS (honest, see docs/ASSUMPTIONS.md): non-PK types are exported
+    as PK (Peace base sections carry no type codes); per-band channel
+    splits are flattened to All; slider-gain sections were absent from
+    the observed file and are not written. Round-trips through our reader.
+    """
+    from ..dsp.geq import ISO31
+    bands = list(bands)[:31]
+    out = ["[Speakers]",
+           "SpeakerId0=0", "SpeakerTargets0=all", "SpeakerName0=All",
+           "SpeakerId1=1", "SpeakerTargets1=L", "SpeakerName1=Left",
+           "SpeakerId2=2", "SpeakerTargets2=R", "SpeakerName2=Right",
+           "", "[General]", f"PreAmp={preamp:g}", "",
+           "[Frequencies]"]
+    for i, b in enumerate(bands, 1):
+        out.append(f"Frequency{i}={b.fc:g}")
+    out.append("")
+    out.append("[Gains]")
+    for i, b in enumerate(bands, 1):
+        out.append(f"Gain{i}={b.gain:g}")
+    out.append("")
+    out.append("[Qualities]")
+    for i, b in enumerate(bands, 1):
+        out.append(f"Quality{i}={b.q:g}")
+    for spk in (1, 2):
+        out += ["", f"[Frequencies{spk}]"]
+        for i, f in enumerate(ISO31, 1):
+            fi = int(f) if float(f).is_integer() else f
+            out.append(f"Frequency{i}={fi}")
+        out += ["", f"[Qualities{spk}]"]
+        for i in range(1, len(ISO31) + 1):
+            out.append(f"Quality{i}=4.32")
+    out += ["", "[Configuration]", "HotKey=", ""]
+    return "\n".join(out)
