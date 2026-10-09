@@ -95,6 +95,45 @@ def graphic_peak_db(gains: list[float] | None, freqs: list[float] | None) -> flo
     return float(max(0.0, max(gains)))
 
 
+def graphic_curve_db(gains: list[float] | None, freqs: np.ndarray,
+                     bands: list[float] | None = None) -> np.ndarray:
+    """Exact APO GraphicEQ curve: dB values interpolated LINEARLY on the
+    LOG-frequency axis between bands; flat outside the outer bands."""
+    f = np.asarray(freqs, dtype=np.float64)
+    if not gains:
+        return np.zeros_like(f)
+    from .geq import ISO31
+    bf = np.array(bands if bands else ISO31, dtype=np.float64)
+    g = np.array(list(gains)[:len(bf)], dtype=np.float64)
+    return np.interp(np.log10(np.maximum(f, 1e-9)), np.log10(bf), g,
+                     left=g[0], right=g[-1])
+
+
+def chain_response_db(bands, freqs: np.ndarray, scope: str = "all",
+                      fs: float = 48000.0,
+                      graphic: list[float] | None = None) -> np.ndarray:
+    """Combined magnitude response (dB) of biquad bands + GraphicEQ curve.
+
+    Feeds the predicted-curve plot AND the anti-clip math (peak of this).
+    """
+    f = np.asarray(freqs, dtype=np.float64)
+    total = np.zeros_like(f)
+    for b in bands:
+        b = b.clipped()
+        if not b.on or b.channel not in ("all", scope):
+            continue
+        if b.ftype == "AP":
+            continue
+        coef = _rbj(b.ftype, b.fc, b.gain, b.q, fs)
+        if coef is None:
+            continue  # Modal/unknown: audit uses |gain| fallback, plot skips
+        _, h = freqz(coef[0], coef[1], worN=f, fs=fs)
+        with np.errstate(divide="ignore"):
+            total += 20.0 * np.log10(np.maximum(np.abs(h), 1e-12))
+    total += graphic_curve_db(graphic, f)
+    return total
+
+
 def convolution_peak_db(path: str) -> tuple[float, str]:
     """Peak gain of an IR file (0 dBFS == 0 dB gain). Missing file -> 0 + note."""
     try:

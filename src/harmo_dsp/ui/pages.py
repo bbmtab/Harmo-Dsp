@@ -2,8 +2,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox,
     QFormLayout, QDoubleSpinBox, QComboBox, QCheckBox, QPlainTextEdit,
-    QHBoxLayout, QFileDialog, QLineEdit,
+    QHBoxLayout, QFileDialog, QLineEdit, QSlider,
 )
+from PySide6.QtCore import Qt
 from .widgets import StepHeader, InfoButton
 
 
@@ -88,6 +89,12 @@ class ImportPage(QWidget):
         mform.addRow(self.m_hint)
         lay.addWidget(meas)
         self._refresh_devices()
+        from .monitor import LiveSpectrum
+        if LiveSpectrum is not None:
+            mon = QGroupBox("📊 Live sound monitor (soundcard → spectrum)")
+            mlay = QVBoxLayout(mon)
+            mlay.addWidget(LiveSpectrum())
+            lay.addWidget(mon)
 
     def _refresh_devices(self):
         from ..io.audio import available, devices
@@ -424,21 +431,37 @@ class FineTunePage(QWidget):
         self.apo_preview.setMaximumHeight(70)
         self.apo_preview.setToolTip("Paste this GraphicEQ line into Equalizer APO config")
         form.addRow(self.apo_preview)
+        from .monitor import PredictedCurve
+        self.pred_curve = PredictedCurve() if PredictedCurve is not None else None
+        if self.pred_curve is not None:
+            self.pred_curve.setToolTip("Green = combined filter response of all 31 bands (real biquad math). Flat line = bypass.")
+            form.addRow(self.pred_curve)
         lay.addWidget(box)
-        self.geq.changed.connect(self._refresh_preview)
+        self.geq.changed.connect(self._eq_changed)
         self.btn_ab.toggled.connect(self._refresh_preview)
         prow = QHBoxLayout()
         self.preamp = QDoubleSpinBox()
-        self.preamp.setRange(-30, 6)
+        self.preamp.setRange(-30, 30)
         self.preamp.setValue(0.0)
         self.preamp.setSuffix(" dB")
-        self.preamp.setToolTip("Preamp (Peace main-screen style): lower overall volume so boosts never clip.\nAPO sums multiple preamps in dB.")
-        self.preamp.valueChanged.connect(self._refresh_preview)
+        self.preamp.setToolTip("Preamp: lower overall volume so boosts never clip.\nAPO sums multiple preamps in dB.")
+        self.preamp.valueChanged.connect(self._preamp_spin_moved)
         prow.addWidget(QLabel("Preamp:"))
         prow.addWidget(self.preamp)
-        self.btn_clip = QPushButton("🛡 Auto (anti-clip)")
-        self.btn_clip.setToolTip("Compute worst-case peak of ALL bands + GraphicEQ (+Convolution file peak)\nand set preamp so nothing can clip. Covers every APO feature in this file.")
-        self.btn_clip.clicked.connect(self._auto_preamp)
+        self.preamp_slider = QSlider(Qt.Horizontal)
+        self.preamp_slider.setRange(-300, 300)  # x10: -30.0..+30.0 dB
+        self.preamp_slider.setValue(0)
+        self.preamp_slider.setSingleStep(5)
+        self.preamp_slider.setPageStep(20)
+        self.preamp_slider.setMinimumWidth(160)
+        self.preamp_slider.setToolTip("Preamp slider −30..+30 dB (Peace-style). Left = safer.")
+        self.preamp_slider.valueChanged.connect(self._preamp_slide_moved)
+        prow.addWidget(self.preamp_slider, 1)
+        self.btn_clip = QPushButton("🛡 Anti-clip: ON")
+        self.btn_clip.setCheckable(True)
+        self.btn_clip.setToolTip("SWITCH, always guarding while ON: every EQ change recomputes the worst peak\n(filters + GraphicEQ + Convolution) and pins preamp there. Turn OFF for manual preamp.")
+        self.btn_clip.toggled.connect(self._clip_toggled)
+        self.btn_clip.setChecked(True)  # safe by default (brief: aman secara default)
         prow.addWidget(self.btn_clip)
         self.btn_save_preset = QPushButton("💾 Save preset…")
         self.btn_save_preset.setToolTip("Save GEQ + parametric + preamp as JSON (Peace-style preset)")
@@ -494,22 +517,67 @@ class FineTunePage(QWidget):
         from ..dsp.clip_guard import suggest_preamp
         _, bands, _, _, _ = self.collect()
         rep = suggest_preamp(bands)
-        self.preamp.setValue(rep["suggest_db"])
+        self._syncing_preamp = True
+        try:
+            self.preamp.setValue(rep["suggest_db"])
+            self.preamp_slider.setValue(int(round(rep["suggest_db"] * 10)))
+        finally:
+            self._syncing_preamp = False
         note = "; ".join(rep["notes"][:2])
-        self.preamp.setToolTip(
-            f"Worst peak L {rep['peak_l']:+.1f} / R {rep['peak_r']:+.1f} dB "
-            f"(filters + GraphicEQ + Convolution). Preamp auto-set {rep['suggest_db']:g} dB."
-            + (f"\nNotes: {note}" if note else ""))
+        tip = (f"Worst peak L {rep['peak_l']:+.1f} / R {rep['peak_r']:+.1f} dB "
+               f"(filters + GraphicEQ + Convolution). Preamp auto-set {rep['suggest_db']:g} dB."
+               + (f"\nNotes: {note}" if note else ""))
+        self.preamp.setToolTip(tip)
+        self.preamp_slider.setToolTip(tip)
+
+    def _preamp_spin_moved(self):
+        if getattr(self, "_syncing_preamp", False):
+            return
+        self._syncing_preamp = True
+        try:
+            self.preamp_slider.setValue(int(round(self.preamp.value() * 10)))
+        finally:
+            self._syncing_preamp = False
+        self._refresh_preview()
+
+    def _preamp_slide_moved(self):
+        if getattr(self, "_syncing_preamp", False):
+            return
+        self._syncing_preamp = True
+        try:
+            self.preamp.setValue(self.preamp_slider.value() / 10.0)
+        finally:
+            self._syncing_preamp = False
+        # spin's valueChanged -> _preamp_spin_moved -> preview (guarded, no loop)
+
+    def _clip_toggled(self, on: bool):
+        self.btn_clip.setText(f"🛡 Anti-clip: {'ON' if on else 'OFF'}")
+        manual = not on
+        self.preamp.setEnabled(manual)
+        self.preamp_slider.setEnabled(manual)
+        if on:
+            self._auto_preamp()  # pin immediately
+        self._refresh_preview()
+
+    def _eq_changed(self):
+        """Any EQ edit: re-pin preamp while the switch is ON, then preview."""
+        if getattr(self, "btn_clip", None) is not None and self.btn_clip.isChecked():
+            self._auto_preamp()
+        self._refresh_preview()
 
     def _refresh_preview(self):
         from ..dsp.peq import build_speakercorrect
         if self.btn_ab.isChecked():
             self.apo_preview.setPlainText("# bypassed — A/B ON, no correction applied")
+            if self.pred_curve is not None:
+                self.pred_curve.set_bands([])
             return
         _, bands, _, _, _ = self.collect()
         txt = build_speakercorrect(bands, self.preamp.value())
         self.apo_preview.setPlainText(txt)
         self.apo_preview.setToolTip("Full speakercorrect.txt preview (Channel L/R blocks). Export writes this file.")
+        if self.pred_curve is not None:
+            self.pred_curve.set_bands(bands)
 
 
 class ExportPage(QWidget):
