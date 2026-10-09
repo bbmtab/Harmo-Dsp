@@ -937,6 +937,8 @@ class ExportPage(QWidget):
             "2. Write temporary test: Preamp: -20 dB\n"
             "3. Music should go almost SILENT = APO hook proven ✓\n"
             "4. Press restore = everything back\n\n"
+            "⚠ Listen on an ATTACHED device (✓ in the list above).\n"
+            "Headphones/Bluetooth without ✓ will NOT change — attach them first.\n\n"
             "Needs admin once (UAC). Proceed?",
         )
         if ok != MB.Yes:
