@@ -1,0 +1,22 @@
+[project]
+name = "harmo-dsp"
+version = "0.0.1"
+description = "Open-source PC speaker correction (EQ + phase), Equalizer APO export"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "numpy",
+  "scipy",
+  "PySide6",
+  "pyqtgraph",
+]
+
+[project.scripts]
+harmo-dsp = "harmo_dsp.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

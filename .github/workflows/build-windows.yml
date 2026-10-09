@@ -1,0 +1,36 @@
+name: build-windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -e . pyinstaller
+
+      - name: Build onedir (no local build, GHA only)
+        run: pyinstaller --onedir --noconfirm --clean --name Harmo-Dsp src/harmo_dsp/__main__.py
+
+      - name: Zip dist
+        run: Compress-Archive -Path dist/Harmo-Dsp/* -DestinationPath Harmo-Dsp-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harmo-Dsp-windows
+          path: Harmo-Dsp-windows.zip
