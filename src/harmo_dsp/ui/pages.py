@@ -19,11 +19,13 @@ def _placeholder(graph_text: str) -> QLabel:
 class ImportPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._tune = None
         lay = QVBoxLayout(self)
         lay.addWidget(StepHeader(
             1, "import", "Import measurement",
             "👉 What to do: measure with REW outside the app, export to .txt/.frd or .wav, "
-            "then drop the files here. L = left speaker, R = right speaker.",
+            "then drop the files here. L = left speaker, R = right speaker.\n"
+            "Shortcut: import REW filter-settings or a Peace preset straight into Step 4.",
             help_keys=["multi_pos", "null"],
         ))
         lay.addWidget(_placeholder("Measured L / R response will appear here"))
@@ -32,12 +34,63 @@ class ImportPage(QWidget):
         self.btn_add.setToolTip("Supports REW exports: frequency text (.txt/.frd) or impulse (.wav)")
         self.btn_add.clicked.connect(self._pick_files)
         row.addWidget(self.btn_add)
+        self.btn_rew = QPushButton("📥  REW filters → Step 4")
+        self.btn_rew.setToolTip("Import REW 'Filter Settings as text' (Generic/FBQ2496) directly as EQ bands")
+        self.btn_rew.clicked.connect(self._import_rew_filters)
+        row.addWidget(self.btn_rew)
+        self.btn_peace = QPushButton("📥  Peace preset → Step 4")
+        self.btn_peace.setToolTip("Import YOUR OWN Peace .peace preset (PreAmp + peak bands)")
+        self.btn_peace.clicked.connect(self._import_peace)
+        row.addWidget(self.btn_peace)
         self.log = QPlainTextEdit()
         self.log.setPlaceholderText("No files yet — add your L and R measurements.")
         self.log.setReadOnly(True)
         self.log.setMaximumHeight(90)
         lay.addLayout(row)
         lay.addWidget(self.log)
+
+    def set_target(self, tune_page):
+        self._tune = tune_page
+
+    def _send_to_tune(self, bands, preamp: float | None, label: str):
+        if self._tune is None:
+            self.log.appendPlainText("⚠ Step 4 not linked yet.")
+            return
+        self._tune.geq.load_rew_bands(bands)
+        if preamp is not None:
+            self._tune.preamp.setValue(preamp)
+        self.log.appendPlainText(f"✓ {label} → {len(bands)} bands loaded into Step 4.")
+
+    def _import_rew_filters(self):
+        from ..io.presets import parse_rew_filter_settings
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import REW filter settings", "",
+            "REW filter settings (*.txt);;All files (*)")
+        for p in paths:
+            try:
+                with open(p, encoding="utf-8-sig", errors="replace") as fh:
+                    bands, notes = parse_rew_filter_settings(fh.read())
+                self._send_to_tune(bands, None, p)
+                for n in notes:
+                    self.log.appendPlainText(f"ℹ {n}")
+            except Exception as e:
+                self.log.appendPlainText(f"⚠ {p} — {e}")
+
+    def _import_peace(self):
+        from ..dsp.peq import PeqBand
+        from ..io.presets import parse_peace_preset
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import Peace preset (your own file)", "",
+            "Peace presets (*.peace *.txt);;All files (*)")
+        for p in paths:
+            try:
+                with open(p, encoding="utf-8-sig", errors="replace") as fh:
+                    data = parse_peace_preset(fh.read())
+                bands = [PeqBand(True, "PK", fc, g, q)
+                         for fc, g, q in data["bands"]]
+                self._send_to_tune(bands, data["preamp"], p)
+            except Exception as e:
+                self.log.appendPlainText(f"⚠ {p} — {e}")
 
     def _pick_files(self):
         from ..io.rew import load_rew_file

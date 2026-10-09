@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
                   self.page_tune, self.page_export):
             self.stack.addWidget(p)
         self.page_export.set_source(self.page_tune)
+        self.page_import.set_target(self.page_tune)
         split.addWidget(self.nav)
         split.addWidget(self.stack)
         split.setStretchFactor(0, 0)

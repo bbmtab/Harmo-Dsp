@@ -26,6 +26,19 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
 - Shelf peak never exceeds |gain| (monotonic) — so plain-shelf math safely
   covers LS/HS 6dB/12dB/LSC/HSC peak estimates.
 
+## OBSERVED (from user's own files in sample_filter/, parsers original)
+- REW "Filter Settings file" (Room EQ V5.18): header + `Equaliser: Generic`
+  + `Filter N: ON|OFF PK Fc X Hz Gain Y dB Q Z` lines; FBQ2496 variant uses
+  `BW Oct W` (converted via Q=1/(2·sinh(ln2/2·W))). Gains exceed ±15
+  (e.g. -21.5 dB) → core range is ±30 dB; sliders stay ±15 (Peace convention).
+- Peace .peace preset (INI): [General] PreAmp; base [Frequencies]/[Gains]/
+  [Qualities] as FrequencyN/GainN/QualityN (all Peak); [Speakers] maps
+  SpeakerId/Targets/Name (0=all,1=L,2=R,3=C,4=SUB); [FrequenciesN] per-speaker
+  ISO slider freqs. Parsed read-only for import (interoperability).
+- impulse.txt: raw float-per-line IR (offer WAV conversion for Convolution).
+- impulse.rephase: rePhase settings blob (base64) — NOT decoded (rePhase is
+  third-party; its export WAV is the interchange path, not its settings).
+
 ## TODO / GUESSES
 - REW menu names differ per version — parser is tolerant, verify with real exports.
 - .mdat format undocumented — NOT supported, message directs to .txt/.wav.

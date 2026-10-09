@@ -58,10 +58,13 @@ class PeqBand:
     def clipped(self) -> "PeqBand":
         ftype = self.ftype if self.ftype in _TYPE else "PK"
         ch = self.channel if self.channel in CHANNELS else "all"
+        # Gain range ±30 dB: APO itself has no ±15 limit; REW auto-EQ
+        # legitimately writes cuts like -21.5 dB (see sample_filter/rew1.txt).
+        # Sliders stay ±15 (Peace convention); detail editor allows ±30.
         return PeqBand(
             self.on, ftype,
             max(10.0, min(24000.0, float(self.fc))),
-            max(-15.0, min(15.0, float(self.gain))),
+            max(-30.0, min(30.0, float(self.gain))),
             max(0.1, min(20.0, float(self.q))),
             max(10.0, min(2000.0, float(self.t60))),
             ch,

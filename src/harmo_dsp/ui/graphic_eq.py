@@ -140,10 +140,10 @@ class GraphicEQ(QWidget):
         dlay.addWidget(QLabel("Fc:"))
         dlay.addWidget(self.d_fc)
         self.d_gain = QDoubleSpinBox()
-        self.d_gain.setRange(-15, 15)
+        self.d_gain.setRange(-30, 30)
         self.d_gain.setDecimals(1)
         self.d_gain.setSuffix(" dB")
-        self.d_gain.setToolTip("Same as the slider — edit here or drag above")
+        self.d_gain.setToolTip("Same as the slider — edit here or drag above (sliders show ±15, REW cuts may exceed that)")
         self.d_gain.valueChanged.connect(self._gain_edited)
         dlay.addWidget(QLabel("Gain:"))
         dlay.addWidget(self.d_gain)
@@ -301,3 +301,16 @@ class GraphicEQ(QWidget):
             c = d.get("ch", "all")
             self._ch[i] = c if c in CHANNELS else "all"
         self.set_gains([self._gain[i] for i in range(31)])
+
+    def load_rew_bands(self, bands):
+        """Fill bands from REW/Peace import; unused bands switch OFF."""
+        for i in range(31):
+            if i < len(bands):
+                b = bands[i].clipped()
+                self._on[i], self._type[i] = b.on, b.ftype
+                self._fc[i], self._gain[i] = b.fc, b.gain
+                self._q[i], self._ch[i] = b.q, b.channel
+            else:
+                self._on[i] = False
+        self.set_gains([self._gain[i] for i in range(31)])
+        self.select(0)
