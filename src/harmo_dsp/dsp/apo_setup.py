@@ -203,3 +203,22 @@ def build_patched_config(current: str, include_name: str) -> tuple[str, bool]:
     if not placed:
         out.append(want)
     return "\n".join(out) + "\n", after_peace
+
+
+def hook_badge(report: dict, default_guid: str) -> tuple[bool, str]:
+    """Traffic-light facts for the status bar (pure, testable).
+
+    Green ONLY when: config wired AND the default playback device is
+    APO-attached. Everything else names its missing piece.
+    """
+    attached_guids = {d.guid.upper() for d in report.get("attached", [])}
+    if report.get("config_state") != "wired":
+        return False, "APO: config not wired (Step 5 → Write)"
+    if not default_guid:
+        return False, "APO: default device unknown"
+    if default_guid.upper() in attached_guids:
+        names = [d.name for d in report.get("attached", [])
+                 if d.guid.upper() == default_guid.upper()]
+        short = (names[0][:40] + "…") if names and len(names[0]) > 40 else (names[0] if names else "")
+        return True, f"APO: LIVE on {short}"
+    return False, "APO: default device not attached (Step 5 → Attach)"

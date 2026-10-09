@@ -36,3 +36,20 @@ def test_live_capable_reports_reason(tmp_path):
     ok, reason = exp.live_capable()
     assert not ok and reason
     w.close()
+
+
+def test_conv_off_clears_field_and_session_fir():
+    w, _, exp = _pages()
+    exp.conv_edit.setText("C:\\fir.wav")
+    w.session["fir"] = {"L": "C:\\fir.wav"}
+    exp._clear_conv()
+    assert exp.conv_edit.text() == ""
+    assert w.session["fir"] == {}
+    w.close()
+
+
+def test_include_idempotent():
+    from harmo_dsp.dsp.apo_setup import build_patched_config
+    cur = "# Convolution: Agu 31 20_51_21-filters-48k.wav\nInclude: speakercorrect.txt\n"
+    new, _ = build_patched_config(cur, "speakercorrect.txt")
+    assert new.strip() == cur.strip()  # no dialog needed, nothing changes

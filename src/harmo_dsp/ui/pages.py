@@ -725,13 +725,17 @@ class ExportPage(QWidget):
         form.addRow("Delay (sub align):", dl)
         crow = QHBoxLayout()
         self.conv_edit = QLineEdit()
-        self.conv_edit.setPlaceholderText("Optional FIR impulse (.wav, 48 kHz) — Convolution")
-        self.conv_edit.setToolTip("APO convolves with this file itself. Sample rate MUST match the device (else APO skips it).")
+        self.conv_edit.setPlaceholderText("Optional FIR impulse (.wav) — empty = NO convolution (filters only)")
+        self.conv_edit.setToolTip("Active convolution file. APO convolves with this file itself.\nSample rate MUST match the device (else APO skips it).\nOld files (e.g. your Aug-31 wav) stay on disk — only referenced lines matter.\nVerify-live warns if 2+ convolutions would stack.")
         self.btn_conv = QPushButton("…")
-        self.btn_conv.setToolTip("Pick impulse response WAV")
+        self.btn_conv.setToolTip("Pick impulse response WAV (replaces current)")
         self.btn_conv.clicked.connect(self._pick_conv)
+        self.btn_conv_clear = QPushButton("✖ Off")
+        self.btn_conv_clear.setToolTip("Turn convolution OFF: clears this field AND forgets generated FIR files (filters keep working)")
+        self.btn_conv_clear.clicked.connect(self._clear_conv)
         crow.addWidget(self.conv_edit, 1)
         crow.addWidget(self.btn_conv)
+        crow.addWidget(self.btn_conv_clear)
         form.addRow("Convolution:", crow)
         self.custom = QPlainTextEdit()
         self.custom.setPlaceholderText("Advanced verbatim lines (Copy:, VST, …) appended at end. Empty = none.")
@@ -956,6 +960,14 @@ class ExportPage(QWidget):
             "Audio (*.wav *.flac *.ogg);;All files (*)")
         if paths:
             self.conv_edit.setText("; ".join(paths))
+
+    def _clear_conv(self):
+        """Convolution OFF: field + session FIR map cleared (filters unaffected)."""
+        self.conv_edit.clear()
+        sess = getattr(self.window(), "session", {}) or {}
+        if isinstance(sess.get("fir"), dict):
+            sess["fir"].clear()
+        self.log.appendPlainText("• Convolution OFF — next Write has no Convolution line.")
 
     def _collect_output(self):
         from ..dsp.apo_config import ApoOutput
@@ -1192,6 +1204,9 @@ class ExportPage(QWidget):
         if cur and not self._backup_config(target_dir, cur):
             return
         new_text, _ = build_patched_config(cur, OUR_FILENAME)
+        if new_text.strip() == cur.strip():
+            self.log.appendPlainText("• Include already present — nothing to confirm.")
+            return
         preview_tail = "\n".join(new_text.splitlines()[-4:])
         ok = QMessageBox.question(
             self, "Confirm Include",
