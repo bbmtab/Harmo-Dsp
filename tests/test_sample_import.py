@@ -4,7 +4,7 @@ import os
 from harmo_dsp.io.presets import parse_rew_filter_settings, parse_peace_preset
 from harmo_dsp.dsp.peq import band_to_line
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "sample_filter")
+SAMPLE = os.path.join(os.path.dirname(__file__), "..", "samples")
 
 
 def _read(name: str) -> str:

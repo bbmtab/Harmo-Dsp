@@ -26,7 +26,7 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
 - Shelf peak never exceeds |gain| (monotonic) — so plain-shelf math safely
   covers LS/HS 6dB/12dB/LSC/HSC peak estimates.
 
-## OBSERVED (from user's own files in sample_filter/, parsers original)
+## OBSERVED (from user's own files in samples/, parsers original)
 - REW "Filter Settings file" (Room EQ V5.18): header + `Equaliser: Generic`
   + `Filter N: ON|OFF PK Fc X Hz Gain Y dB Q Z` lines; FBQ2496 variant uses
   `BW Oct W` (converted via Q=1/(2·sinh(ln2/2·W))). Gains exceed ±15
@@ -38,6 +38,21 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
 - impulse.txt: raw float-per-line IR (offer WAV conversion for Convolution).
 - impulse.rephase: rePhase settings blob (base64) — NOT decoded (rePhase is
   third-party; its export WAV is the interchange path, not its settings).
+
+## FIR / PHASE (in-house mixed-phase designer, src/harmo_dsp/dsp/fir.py)
+- Split via real cepstrum (fold negative quefrencies). Standard method,
+  implementation original. Verified on synthetics only (criteria a–e green).
+- Excess-phase inverse is PHASE-ONLY, gated by: frequency (below
+  phase_below_hz), inter-position consistency, 40 dB null gate.
+- Frequency-dependent windowing (40/20/5 ms bands) with per-band own-peak
+  placement + circular extraction (IFFT wraps). Shared-centre placement was
+  tried and FAILED on dispersive signals (measured, not assumed).
+- Advance (non-causal part) linearised with explicit pre-room taps//4;
+  final window asymmetric (flat pre-response, faded tail) — a symmetric
+  Hann was tried and re-broke group delay (measured).
+- Honest metrics reported: taps, latency from ACTUAL argmax, pre-ring
+  energy ratio. No parity claim vs Dirac: Dirac adds guided measurement,
+  MIMO/time alignment and years of tuning. Parity needs Gate 3 (real rig).
 
 ## TODO / GUESSES
 - REW menu names differ per version — parser is tolerant, verify with real exports.

@@ -100,7 +100,22 @@ class ImportPage(QWidget):
         )
         for p in paths:
             if p.lower().endswith(".wav"):
-                self.log.appendPlainText(f"🎵 {p} — impulse import shows in Target graph (FIR step, TODO)")
+                try:
+                    from ..io.irwav import load_ir_mono
+                    fs, x = load_ir_mono(p)
+                    win = self.window()
+                    sess = getattr(win, "session", None)
+                    if sess is not None:
+                        store = sess.setdefault("ir", {})
+                        ch = "L" if "L" not in store else "R"
+                        store[ch] = (fs, x)
+                        self.log.appendPlainText(
+                            f"🎵 {p} → IR channel {ch} ({fs} Hz, {len(x)} samples). "
+                            f"Phase correction (Step 3 FIR) unlocked.")
+                    else:
+                        self.log.appendPlainText(f"🎵 {p} — ({fs} Hz, session unavailable)")
+                except Exception as e:
+                    self.log.appendPlainText(f"⚠ {p} — {e}")
                 continue
             try:
                 m = load_rew_file(p)
@@ -165,6 +180,73 @@ class AutoCorrectPage(QWidget):
         self.btn_calc.setToolTip("Runs the PEQ solver on the averaged measurement")
         form.addRow(self.btn_calc)
         lay.addWidget(box)
+
+        fir = QGroupBox("🌀 Phase correction — FIR (Dirac/rePhase-chasing, experimental)")
+        fform = QFormLayout(fir)
+        fform.addRow(QLabel("Needs IR (.wav) from Step 1. Magnitude-only → minimum-phase path."))
+        self.fir_taps = QComboBox()
+        self.fir_taps.addItems(["1024", "2048", "4096", "8192", "16384"])
+        self.fir_taps.setCurrentText("4096")
+        self.fir_taps.setToolTip("Filter length. Longer = finer bass + more latency/CPU.")
+        fform.addRow("Taps:", self.fir_taps)
+        srow = QHBoxLayout()
+        self.fir_strength = QDoubleSpinBox()
+        self.fir_strength.setRange(0, 100)
+        self.fir_strength.setValue(30)
+        self.fir_strength.setSuffix(" %")
+        self.fir_strength.setToolTip("Phase strength: 0% = pure minimum-phase (safe). Higher = more excess-phase correction, more pre-ringing risk. Default conservative.")
+        srow.addWidget(self.fir_strength)
+        srow.addWidget(InfoButton("pre_ringing"))
+        fform.addRow("Phase strength:", srow)
+        self.fir_below = QDoubleSpinBox()
+        self.fir_below.setRange(50, 5000)
+        self.fir_below.setValue(300)
+        self.fir_below.setSuffix(" Hz")
+        self.fir_below.setToolTip("Excess-phase correction only below this frequency (single position: keep low).")
+        fform.addRow("Correct phase below:", self.fir_below)
+        self.btn_fir = QPushButton("🌀  Generate FIR + WAV")
+        self.btn_fir.setToolTip("Design mixed-phase FIR, save Convolution WAV, auto-fill Step 5")
+        self.btn_fir.clicked.connect(self._gen_fir)
+        fform.addRow(self.btn_fir)
+        self.fir_metrics = QLabel("No FIR yet — import .wav IR in Step 1 first.")
+        self.fir_metrics.setWordWrap(True)
+        fform.addRow(self.fir_metrics)
+        lay.addWidget(fir)
+
+    def _gen_fir(self):
+        from PySide6.QtWidgets import QMessageBox
+        from ..dsp.fir import design_speaker_fir, FirParams, save_fir_wav
+        win = self.window()
+        sess = getattr(win, "session", {}) or {}
+        irs = sess.get("ir", {})
+        if not irs:
+            QMessageBox.information(self, "FIR", "Import impulse response (.wav) in Step 1 first.\nMagnitude-only data stays minimum-phase.")
+            return
+        fs_set = {fs for fs, _ in irs.values()}
+        if len(fs_set) != 1:
+            QMessageBox.warning(self, "FIR", f"Mixed sample rates {sorted(fs_set)} — resample outside first.")
+            return
+        fs = fs_set.pop()
+        positions = [irs[k][1] for k in ("L", "R") if k in irs]
+        p = FirParams(taps=int(self.fir_taps.currentText()),
+                      strength=self.fir_strength.value() / 100.0,
+                      phase_below_hz=self.fir_below.value(),
+                      boost_max_db=self.max_boost.value())
+        rep = design_speaker_fir(positions, fs, p)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save FIR for Convolution", f"harmo-fir-{fs}.wav",
+            "WAV (*.wav)")
+        if not path:
+            return
+        save_fir_wav(path, rep, normalize=True)
+        sess["fir_wav"] = path
+        exp = getattr(win, "page_export", None)
+        if exp is not None:
+            exp.conv_edit.setText(path)
+        self.fir_metrics.setText(
+            f"taps {rep.taps_n} • latency {rep.latency_ms:.2f} ms • "
+            f"pre-ring {rep.pre_ring_db:.1f} dB • peak {rep.peak_db:.1f} dB\n"
+            + "\n".join(rep.notes))
 
 
 class FineTunePage(QWidget):
@@ -395,9 +477,18 @@ class ExportPage(QWidget):
             bands.append(PeqBand(True, "HP", 50, 0, 1.0, 100.0, "all"))
         conv: dict[int, str] = {}
         raw = self.conv_edit.text().strip()
+        if not raw:
+            sess = getattr(self.window(), "session", {}) or {}
+            if sess.get("fir_wav"):
+                raw = sess["fir_wav"]
         if raw:
             first = raw.split(";")[0].strip()
-            conv[48000] = first  # assumed rate; Verify warns if device differs
+            try:
+                from scipy.io.wavfile import read as _wr
+                _fs, _ = _wr(first)
+                conv[int(_fs)] = first  # real rate, not assumed
+            except Exception:
+                conv[48000] = first  # assumed rate; Verify warns if device differs
         return ApoOutput(
             preamp_db=preamp, device_pattern=self.device_edit.text().strip(),
             bands=bands, graphic_l=gl, graphic_r=gr,

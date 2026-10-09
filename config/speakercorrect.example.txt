@@ -1,0 +1,13 @@
+# speakercorrect.txt — written by Harmo-Dsp (do not hand-edit)
+# Order matters: APO processes top to bottom.
+# If Peace is also installed, keep this Include AFTER peace.txt
+# so speaker correction applies last.
+Preamp: -4 dB
+
+Channel: L
+Filter: ON PK Fc 100 Hz Gain -4 dB Q 2
+Filter: ON HSC Fc 8000 Hz Gain 2 dB Q 1
+
+Channel: R
+Filter: ON PK Fc 100 Hz Gain -4 dB Q 2
+Filter: ON HSC Fc 8000 Hz Gain 2 dB Q 1

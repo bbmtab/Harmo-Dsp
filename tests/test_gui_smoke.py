@@ -16,6 +16,10 @@ def test_main_window_creates():
     assert w.theme.toggle() in ("light", "dark")
     # channel defaults to stereo 2.0
     assert w.channels.mode() == "stereo20"
+    # session + FIR panel wired (phase path needs IRs, refuses without)
+    assert isinstance(w.session, dict)
+    assert w.page_auto.fir_strength.value() == 30  # conservative default
+    assert w.page_export.conv_edit.text() == ""
     w.close()
 
 

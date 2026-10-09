@@ -7,3 +7,9 @@ build/
 *.egg-info/
 .planning/
 Synthesis/
+# user outputs (examples are committed, outputs are not)
+config/speakercorrect.txt
+config/*.bak-*
+config/*.wav
+plugins/*/bin/
+plugins/*/*.exe

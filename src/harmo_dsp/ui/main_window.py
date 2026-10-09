@@ -26,6 +26,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Harmo-Dsp — PC speaker correction (Stereo 2.0 / 2.1)")
         self.resize(1080, 680)
+        # Shared session: measurements/IRs/FIR paths (all local, in-memory).
+        self.session: dict = {}
 
         self.theme = ThemeManager(self._app())
         self.theme.apply(ThemeManager.DARK)
