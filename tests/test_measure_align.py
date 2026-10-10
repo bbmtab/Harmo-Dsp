@@ -36,6 +36,9 @@ def test_levels_and_verdict():
     assert "OK" in level_verdict(pk, rms)
     assert "LOUD" in level_verdict(-0.5, -3.0)
     assert "QUIET" in level_verdict(-30.0, -40.0)
+    # spike vs hot signal: full-scale peak + quiet RMS = glitch, not loud
+    assert "SPIKES" in level_verdict(-0.0, -38.2)
+    assert "SPIKES" not in level_verdict(-0.5, -3.0)
 
 
 def test_onset_and_align():

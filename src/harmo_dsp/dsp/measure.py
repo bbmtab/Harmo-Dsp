@@ -73,6 +73,12 @@ def level_dbfs(x: np.ndarray) -> tuple[float, float]:
 
 
 def level_verdict(peak_db: float, rms_db: float) -> str:
+    if peak_db >= -1.0 and rms_db < -30.0:
+        # full-scale PEAK with a quiet RMS = isolated digital spikes
+        # (buffer glitch / bad driver variant), NOT a hot acoustic signal
+        return (f"SPIKES detected (peak {peak_db:.1f} but RMS {rms_db:.1f} "
+                f"dBFS) — driver glitch or gain too high; lower mic gain "
+                f"or retry")
     if peak_db >= -1.0:
         return "TOO LOUD — clipping risk, lower volume"
     if peak_db >= -24.0:
