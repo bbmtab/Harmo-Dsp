@@ -15,6 +15,7 @@ def build_server():
     mcp.tool(tools.list_audio_devices)
     mcp.tool(tools.get_output_meter)
     mcp.tool(tools.import_measurement)
+    mcp.tool(tools.save_graph)
     mcp.tool(tools.analyze_measurement)
     mcp.tool(tools.get_eq)
     mcp.tool(tools.set_eq)

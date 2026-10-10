@@ -78,7 +78,6 @@ def test_measure_sweep_proceeds_after_good_level(monkeypatch):
     _reset()
     import numpy as np
     from harmo_dsp.io import audio as A
-    from harmo_dsp.dsp.measure import log_sweep
 
     def fake(sweep, fs, out, inp, seconds):
         return np.asarray(sweep[:int(seconds * fs)]) * 0.5
@@ -87,6 +86,35 @@ def test_measure_sweep_proceeds_after_good_level(monkeypatch):
     r = json.loads(T.measure_sweep("0: x", "1: y", seconds=1.0, confirm=True))
     assert r.get("recorded") is True
     assert r["levels_precheck"]["verdict"].startswith("OK")
+
+
+def test_save_graph_writes_png(tmp_path):
+    _reset()
+    png = tmp_path / "fr.png"
+    r = json.loads(T.save_graph(str(png)))  # nothing in session yet
+    assert "error" in r
+    # put a synthetic measurement in session, then draw
+    T.SESSION["measurements"]["syn"] = type(
+        "M", (), {"frequencies": [20 * 2 ** (i / 48) for i in range(193)],
+                  "spl": [0.0] * 96 + [6.0, 6.0, 6.0] + [0.0] * 94,
+                  "phase": None})()
+    r2 = json.loads(T.save_graph(str(png)))
+    assert r2.get("saved") and r2["curves"] == ["syn"]
+    assert png.exists() and png.stat().st_size > 1000
+
+
+def test_ir_freq_response_finds_bump():
+    import numpy as np
+    from scipy.signal import lfilter
+    from harmo_dsp.dsp.measure import ir_freq_response
+    from harmo_dsp.dsp.clip_guard import _rbj
+    fs = 8000
+    b, a = _rbj("PK", 500, 8.0, 2.0, fs)
+    ir = lfilter(b, a, np.concatenate([np.ones(1), np.zeros(2047)]))
+    f, db = ir_freq_response(ir, fs)
+    i = int(np.argmin(np.abs(f - 500)))
+    assert abs(f[i] - 500) <= 12  # ~2.2%/step log grid near 500 Hz
+    assert db[i] > 6.0  # the +8 dB bump is visible at the grid point
 
 
 def test_backend_and_meter_never_crash():

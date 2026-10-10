@@ -29,7 +29,24 @@ class ImportPage(QWidget):
             "Shortcut: import REW filter-settings or a Peace preset straight into Step 4.",
             help_keys=["multi_pos", "null"],
         ))
-        lay.addWidget(_placeholder("Measured L / R response will appear here"))
+        self._meas_curves: dict[str, tuple] = {}
+        self._meas_plot = None
+        self._meas_curve_item = None
+        try:
+            import pyqtgraph as pg
+            self._meas_plot = pg.PlotWidget()
+            self._meas_plot.setLogMode(x=True, y=False)
+            self._meas_plot.setLabel("left", "dB (rel. median)")
+            self._meas_plot.setLabel("bottom", "Hz")
+            self._meas_plot.setMinimumHeight(170)
+            self._meas_plot.addLine(y=0, pen=pg.mkPen("#666666", width=1))
+            self._meas_plot.setToolTip("Measured response (relative level — "
+                                       "absolute SPL needs a calibrated mic).")
+            self._meas_curve_item = self._meas_plot.plot(
+                pen=pg.mkPen("#4da6ff", width=2))
+            lay.addWidget(self._meas_plot)
+        except Exception:
+            lay.addWidget(_placeholder("Measured L / R response will appear here"))
         row = QHBoxLayout()
         self.btn_add = QPushButton("📂  Add .txt / .frd / .wav …")
         self.btn_add.setToolTip("Supports REW exports: frequency text (.txt/.frd) or impulse (.wav)")
@@ -159,9 +176,13 @@ class ImportPage(QWidget):
             sess = getattr(win, "session", None)
             if sess is not None:
                 sess.setdefault("ir", {})[key] = (fs, ir)
+            from ..dsp.measure import ir_freq_response
+            fgrid, dbcurve = ir_freq_response(ir, fs)
+            self._plot_meas(f"IR {key[0]} pos {key[1] + 1}", fgrid, dbcurve)
             self.log.appendPlainText(
                 f"✓ IR {key[0]} pos {key[1] + 1}: {len(ir)} samples @ {fs} Hz "
-                f"(rec peak {pk:.1f} dBFS). Step 3 FIR + time-align unlocked.")
+                f"(rec peak {pk:.1f} dBFS). Step 3 FIR + time-align unlocked. "
+                f"Graph updated ←")
         except Exception as e:
             self.log.appendPlainText(f"⚠ Measurement failed: {e}")
 
@@ -208,6 +229,18 @@ class ImportPage(QWidget):
             except Exception as e:
                 self.log.appendPlainText(f"⚠ {p} — {e}")
 
+    def _plot_meas(self, label: str, freqs, db) -> None:
+        """Store a curve + draw the latest one (median-normalised)."""
+        import numpy as np
+        f = np.asarray(freqs, dtype=np.float64)
+        y = np.asarray(db, dtype=np.float64)
+        if len(f) < 4:
+            return
+        y = y - float(np.median(y))
+        self._meas_curves[label] = (f, y)
+        if self._meas_curve_item is not None:
+            self._meas_curve_item.setData(f, y)
+
     def _pick_files(self):
         from ..io.rew import load_rew_file
         paths, _ = QFileDialog.getOpenFileNames(
@@ -229,6 +262,10 @@ class ImportPage(QWidget):
                         n_same = sum(1 for k in store if k == ch or (
                             isinstance(k, tuple) and k[0] == ch))
                         store[(ch, n_same)] = (fs, x)
+                        from ..dsp.measure import ir_freq_response
+                        fgrid, dbcurve = ir_freq_response(x, fs)
+                        self._plot_meas(f"IR {ch} pos {n_same + 1}",
+                                        fgrid, dbcurve)
                         self.log.appendPlainText(
                             f"🎵 {p} → IR {ch} pos {n_same + 1} ({fs} Hz, {len(x)} samples). "
                             f"Phase correction (Step 3 FIR) unlocked.")
@@ -239,6 +276,7 @@ class ImportPage(QWidget):
                 continue
             try:
                 m = load_rew_file(p)
+                self._plot_meas(p, m.frequencies, m.spl)
                 self.log.appendPlainText(f"✓ {p} — {len(m)} points, {m.frequencies[0]:g}–{m.frequencies[-1]:g} Hz")
             except Exception as e:  # friendly message, never a traceback popup
                 self.log.appendPlainText(f"⚠ {p} — could not read: {e}")

@@ -311,6 +311,55 @@ def measure_sweep(output: str, input: str, seconds: float = 5.0,
         return _j({"error": f"{type(e).__name__}: {e}"})
 
 
+def save_graph(path: str, name: str = "") -> str:
+    """Render session measurements (FR curves + IR-derived) to a PNG.
+
+    No sound, no config writes — pure picture for the human to look at.
+    """
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    if not SESSION["measurements"] and not SESSION["irs"]:
+        return _j({"error": "nothing to draw; import_measurement or "
+                           "measure_sweep first"})
+    try:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+        import numpy as np
+        import pyqtgraph as pg
+        curves = {}
+        for k, m in SESSION["measurements"].items():
+            if name and name != k:
+                continue
+            curves[k] = (np.asarray(m.frequencies, dtype=np.float64),
+                         np.asarray(m.spl, dtype=np.float64))
+        from ..dsp.measure import ir_freq_response
+        for k, (fs, x) in SESSION["irs"].items():
+            if name and name != k:
+                continue
+            curves[f"IR {k}"] = ir_freq_response(x, int(fs))
+        if not curves:
+            return _j({"error": f"no curve named {name!r}",
+                       "have": list(SESSION["measurements"])
+                               + list(SESSION["irs"])})
+        plt = pg.PlotWidget()
+        plt.setLogMode(x=True, y=False)
+        plt.setLabel("left", "dB (rel. median)")
+        plt.setLabel("bottom", "Hz")
+        plt.addLine(y=0, pen=pg.mkPen("#666666", width=1))
+        for k, (f, db) in curves.items():
+            db = np.asarray(db, dtype=np.float64)
+            plt.plot(np.asarray(f), db - float(np.median(db)),
+                     pen=pg.mkPen(width=2))
+        app.processEvents()
+        img = plt.grab()
+        img.save(path)
+        plt.close()
+        return _j({"saved": os.path.abspath(path),
+                   "curves": list(curves)})
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}"})
+
+
 def time_align() -> str:
     if len(SESSION["irs"]) < 2:
         return _j({"error": "need >=2 IRs (import .wav files or measure)",

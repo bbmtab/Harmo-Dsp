@@ -78,3 +78,25 @@ def level_verdict(peak_db: float, rms_db: float) -> str:
     if peak_db >= -24.0:
         return "OK — good level for measurement"
     return "TOO QUIET — raise volume / mic gain"
+
+
+def ir_freq_response(ir: np.ndarray, fs: int, grid_n: int = 240,
+                     win_ms: float = 400.0) -> tuple[np.ndarray, np.ndarray]:
+    """Frequency response (dB, median-normalised) from an impulse.
+
+    Windowed FFT -> log-frequency grid. Level is RELATIVE (median = 0):
+    absolute SPL needs a calibrated mic, which we do not assume.
+    """
+    x = np.asarray(ir, dtype=np.float64)
+    win = max(256, min(len(x), int(win_ms / 1000.0 * fs)))
+    seg = x[:win] * np.hanning(win)
+    spec = np.abs(np.fft.rfft(seg, n=max(4096, win)))
+    f = np.fft.rfftfreq(max(4096, win), 1.0 / fs)
+    with np.errstate(divide="ignore"):
+        db = 20.0 * np.log10(np.maximum(spec, 1e-12))
+    lo, hi = np.log10(20.0), np.log10(min(20000.0, fs / 2.0))
+    grid = np.logspace(lo, hi, grid_n)
+    dbg = np.interp(np.log10(grid), np.log10(np.maximum(f[1:], 1e-9)),
+                    db[1:], left=db[1], right=db[-1])
+    dbg = dbg - float(np.median(dbg))
+    return grid, dbg
