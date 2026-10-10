@@ -97,3 +97,29 @@ def test_auto_eq_tool_end_to_end_preview():
     assert r["written"] is False and "Preview" in r["note"]
     cur = json.loads(T.get_eq())
     assert len(cur["bands"]) == r["bands_placed"]
+
+
+def test_auto_eq_ear_gate_blocks_write(monkeypatch):
+    """Nothing goes live until the human LISTENED (regression: the
+    28.5% 'improvement' fitted noise and wrecked the user's audio)."""
+    from harmo_dsp.mcp_server import tools as T
+    from harmo_dsp.dsp import apo_setup as S
+    import json
+    T.SESSION.clear()
+    T.SESSION.update({"measurements": {}, "irs": {}, "bands": [],
+                      "preamp": 0.0})
+    T.SESSION["measurements"]["syn"] = type(
+        "M", (), {"frequencies": list(F),
+                  "spl": list(_pk(60, 8.0, 2.0)), "phase": None})()
+    # pretend APO dir exists and is writable
+    import tempfile, os
+    fd = tempfile.mkdtemp()
+    monkeypatch.setattr(S, "find_config_dir", lambda *a, **k: fd)
+    r = json.loads(T.auto_eq(target="flat", write=True,
+                             listen_approved=False))
+    assert r.get("written") is False
+    assert "ear gate" in r["refused"]
+    assert not os.path.exists(os.path.join(fd, "speakercorrect.txt"))
+    r2 = json.loads(T.auto_eq(target="flat", write=True,
+                              listen_approved=True))
+    assert r2.get("written") is True

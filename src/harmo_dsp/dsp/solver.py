@@ -23,9 +23,9 @@ from .clip_guard import _rbj
 class SolverParams:
     max_bands: int = 10
     max_boost: float = 6.0
-    max_cut: float = 15.0
+    max_cut: float = 8.0   # was 15: bad-SNR fits made destructive walls of cuts
     q_min: float = 0.5
-    q_max_bass: float = 8.0
+    q_max_bass: float = 5.0   # was 8: stacked Q8 cuts rang on transients (noise)
     q_max_treble: float = 1.5
     xover_hz: float = 500.0
     fit_lo: float = 30.0

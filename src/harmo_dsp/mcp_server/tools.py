@@ -362,12 +362,14 @@ def save_graph(path: str, name: str = "") -> str:
 
 def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
             max_bands: int = 10, max_boost: float = 6.0,
-            write: bool = False, name: str = "") -> str:
+            write: bool = False, listen_approved: bool = False,
+            name: str = "") -> str:
     """Dirac-style auto-correction: flatten session measurement toward
     the target (default: bass +3 dB below 80 Hz, mids/highs flat).
 
-    Cuts peaks; never boosts nulls; high Q only in bass. Optionally
-    writes the result to Equalizer APO (write=true).
+    Cuts peaks; never boosts nulls; high Q only in bass. Write requires
+    BOTH >=15% measured improvement AND listen_approved=true (the user
+    must have heard the preview and said OK — numbers alone have lied).
     """
     import numpy as np
     # 1) pick the curve: named measurement, latest measurement, or last IR
@@ -414,6 +416,14 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
         out["refused"] = (f"improvement {imp*100:.1f}% < 15% — measurement "
                           f"SNR too low. Raise speaker volume / mic gain, "
                           f"re-measure, retry. Nothing was written.")
+        return _j(out)
+    if write and not listen_approved:
+        # EAR GATE (regression fix): numbers can lie when SNR is bad —
+        # nothing goes live until a human has LISTENED and approved.
+        out["written"] = False
+        out["refused"] = ("ear gate: re-call with listen_approved=true "
+                          "AFTER the user heard the preview and approved "
+                          "it (set_eq preview / GUI A/B). Nothing written.")
         return _j(out)
     if not write:
         out["written"] = False
