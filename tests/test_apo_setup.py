@@ -16,6 +16,20 @@ def test_idle_comment_only_config(tmp_path):
     assert state == "idle" and "Configurator" in msg
 
 
+def test_commented_include_does_not_count_as_wired(tmp_path):
+    # REGRESSION: a commented Include used to re-enable the chain silently
+    (tmp_path / "config.txt").write_text(
+        "# Include: speakercorrect.txt   <- disabled\n", encoding="utf-8")
+    assert not S.include_active(S.read_config(str(tmp_path)))
+    state, _ = S.status(str(tmp_path))
+    assert state != "wired"
+    # real Include counts
+    (tmp_path / "config.txt").write_text(
+        "Include: speakercorrect.txt\n", encoding="utf-8")
+    assert S.include_active(S.read_config(str(tmp_path)))
+    assert S.status(str(tmp_path))[0] == "wired"
+
+
 def test_wired_and_peace_states(tmp_path):
     (tmp_path / "config.txt").write_text(
         "Include: peace.txt\nInclude: speakercorrect.txt\n", encoding="utf-8")

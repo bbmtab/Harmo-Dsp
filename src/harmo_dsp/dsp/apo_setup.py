@@ -43,6 +43,21 @@ def read_config(config_dir: str) -> str:
         return ""
 
 
+def include_active(text: str, name: str = "speakercorrect") -> bool:
+    """True only when a REAL (non-comment) Include line for `name` exists.
+
+    Substring matching counts commented-out lines too — that regression
+    silently re-enabled the chain once. Comments must never count.
+    """
+    for raw in text.splitlines():
+        ln = raw.strip()
+        if not ln or ln.startswith("#") or ln.startswith(";"):
+            continue
+        if ln.lower().startswith("include:") and name in ln.lower():
+            return True
+    return False
+
+
 def status(config_dir: str | None) -> tuple[str, str]:
     """(state, human message). States: missing | idle | peace-idle | wired."""
     if not config_dir:
@@ -50,10 +65,9 @@ def status(config_dir: str | None) -> tuple[str, str]:
                 "✗ Equalizer APO not found. Install it (once, official), "
                 "then attach your speaker in Configurator + reboot.")
     text = read_config(config_dir)
-    low = text.lower()
-    if "speakercorrect" in low:
+    if include_active(text):
         return ("wired", f"✓ Wired: speakercorrect is Included ({config_dir}).")
-    if "peace.txt" in low:
+    if include_active(text, "peace.txt"):
         return ("peace-idle",
                 f"ℹ Peace drives APO here; ours is not Included yet. "
                 f"Write the file, then add our Include AFTER peace.txt.")

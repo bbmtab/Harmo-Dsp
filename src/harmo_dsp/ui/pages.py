@@ -613,10 +613,10 @@ class FineTunePage(QWidget):
             self.btn_admin.setVisible(True)
             self.btn_live.setText("⚪ Live: OFF (need admin)")
             return
-        from ..dsp.apo_setup import read_config
+        from ..dsp.apo_setup import read_config, include_active
         cfg_dir = exp._apo_target_dir()
         cfg = read_config(cfg_dir) if cfg_dir else ""
-        if "speakercorrect" not in cfg.lower():
+        if not include_active(cfg):
             self.btn_live.setText("⚪ Live: OFF (Step 5 → Write once)")
             self.btn_live.setToolTip("Include is NOT in config.txt. Press "
                                      "💾 Write in Step 5 (with its backup + "
