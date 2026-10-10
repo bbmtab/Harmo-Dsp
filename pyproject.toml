@@ -13,15 +13,20 @@ dependencies = [
 
 [project.scripts]
 harmo-dsp = "harmo_dsp.__main__:main"
+harmo-dsp-mcp = "harmo_dsp.mcp_server.server:main"
 
 [project.optional-dependencies]
 test = [
   "pytest",
   "pytest-qt",
+  "fastmcp",
 ]
 measure = [
   "sounddevice",
   "pyaudiowpatch",
+]
+mcp = [
+  "fastmcp",
 ]
 [build-system]
 requires = ["setuptools>=61"]

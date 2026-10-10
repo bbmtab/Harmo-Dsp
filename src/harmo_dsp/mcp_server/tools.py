@@ -1,0 +1,293 @@
+"""Plain tool functions + session state (import-safe without fastmcp).
+
+Every heavy import happens INSIDE the function so this module (and its
+tests) never pull Qt or audio backends at import time.
+"""
+from __future__ import annotations
+import json
+
+SESSION: dict = {"measurements": {}, "irs": {}, "bands": [], "preamp": 0.0}
+
+
+def _j(obj) -> str:
+    return json.dumps(obj, indent=1, default=str)
+
+
+def check_backend() -> str:
+    versions = {}
+    for mod in ("numpy", "scipy", "sounddevice", "pyaudiowpatch"):
+        try:
+            m = __import__(mod)
+            versions[mod] = getattr(m, "__version__", "?")
+        except ImportError:
+            versions[mod] = "missing"
+    try:
+        from ..dsp.apo_setup import full_report
+        rep = full_report()
+        apo = rep["lines"]
+    except Exception as e:
+        apo = [f"APO check failed: {e}"]
+    try:
+        from ..io.meter import get_output_peak
+        peak = get_output_peak()
+        meter = ("off" if peak is None
+                 else ("silent" if peak == 0.0 else f"{peak:.4f}"))
+    except Exception:
+        meter = "off"
+    return _j({"versions": versions, "apo": apo, "output_meter": meter,
+               "note": "Headless Harmo-Dsp core. All processing local."})
+
+
+def list_audio_devices() -> str:
+    from ..io.audio import available, devices
+    if not available():
+        return _j({"error": "No audio backend (pip install pyaudiowpatch "
+                           "or sounddevice)."})
+    outs, ins = devices()
+    return _j({"outputs": outs, "inputs": ins,
+               "hint": "Labels are 'index: name' — pass them verbatim to "
+                       "measure_sweep."})
+
+
+def get_output_meter() -> str:
+    try:
+        from ..io.meter import get_output_peak
+        import math
+        peak = get_output_peak()
+        if peak is None:
+            return _j({"status": "unavailable"})
+        if peak <= 0.0:
+            return _j({"status": "silent", "peak": 0.0, "db": None})
+        return _j({"status": "live", "peak": round(peak, 5),
+                   "db": round(20 * math.log10(peak), 2)})
+    except Exception as e:
+        return _j({"status": "error", "error": str(e)})
+
+
+def import_measurement(path: str, name: str = "") -> str:
+    """Auto-sniff: REW filter-settings / freq-response txt-frd / Peace
+    .peace / impulse .wav. Stores into the session, returns a summary."""
+    import os
+    label = name or os.path.splitext(os.path.basename(path))[0]
+    low = path.lower()
+    try:
+        if low.endswith(".wav"):
+            from ..io.irwav import load_ir_mono
+            fs, x = load_ir_mono(path)
+            n = len(SESSION["irs"])
+            SESSION["irs"][f"{label}#{n}"] = (fs, x)
+            return _j({"kind": "impulse", "name": label, "fs": fs,
+                       "samples": len(x),
+                       "note": "IR stored; time_align/design_fir unlocked."})
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            text = fh.read()
+        # 1) REW filter settings ("Filter  1: ON  PK ...")
+        if "filter settings file" in text.lower() or "filter" in text.lower():
+            try:
+                from ..io.presets import parse_rew_filter_settings
+                bands, notes = parse_rew_filter_settings(text)
+                SESSION["bands"] = bands
+                return _j({"kind": "rew-filters", "name": label,
+                            "bands": len(bands), "notes": notes,
+                            "note": "Bands loaded into session EQ "
+                                    "(get_eq/set_eq)."})
+            except ValueError:
+                pass
+        # 2) Peace preset ([Sections] INI)
+        if "[" in text and "]" in text and "Frequency" in text:
+            from ..io.presets import parse_peace_preset
+            from ..dsp.peq import PeqBand
+            data = parse_peace_preset(text)
+            SESSION["bands"] = [PeqBand(True, "PK", f, g, q)
+                                for f, g, q in data["bands"]]
+            SESSION["preamp"] = data["preamp"]
+            return _j({"kind": "peace-preset", "name": label,
+                        "bands": len(SESSION["bands"]),
+                        "preamp": data["preamp"]})
+        # 3) frequency response columns
+        from ..io.rew import parse_rew_text
+        m = parse_rew_text(text, label)
+        SESSION["measurements"][label] = m
+        return _j({"kind": "freq-response", "name": label,
+                    "points": len(m),
+                    "range_hz": [m.frequencies[0], m.frequencies[-1]],
+                    "spl_min": min(m.spl), "spl_max": max(m.spl),
+                    "has_phase": m.phase is not None,
+                    "note": "Analyze with analyze_measurement."})
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}",
+                   "hint": "Supported: REW filter-settings txt, freq txt/frd, "
+                           "Peace .peace, IR .wav (16/24/32/float)."})
+
+
+def _smooth(y, k: int = 5):
+    import numpy as np
+    if len(y) < k * 2:
+        return list(y)
+    arr = np.convolve(np.asarray(y, dtype=float), np.ones(k) / k, mode="same")
+    return list(arr)
+
+
+def analyze_measurement(name: str) -> str:
+    m = SESSION["measurements"].get(name)
+    if m is None:
+        return _j({"error": "no such measurement; import first",
+                   "have": list(SESSION["measurements"])})
+    import numpy as np
+    f = np.asarray(m.frequencies)
+    y = np.asarray(_smooth(m.spl, 5))
+    half = 4
+    peaks, dips = [], []
+    for i in range(half, len(f) - half):
+        seg = y[i - half:i + half + 1]
+        if y[i] == seg.max() and y[i] > seg.min() + 1.0:
+            peaks.append((float(f[i]), float(y[i])))
+        if y[i] == seg.min() and seg.max() > y[i] + 1.0:
+            dips.append((float(f[i]), float(y[i])))
+    peaks = sorted(peaks, key=lambda t: -t[1])[:5]
+    dips = sorted(dips, key=lambda t: t[1])[:5]
+    hints = []
+    for fq, db in peaks:
+        if fq < 300 and db > 3:
+            hints.append(f"{fq:.0f} Hz +{db:.1f} dB — likely room mode "
+                         f"(5th-length mode ≈ {343/(2*fq):.1f} m room dimension)")
+    for fq, db in dips:
+        if fq < 300 and db < -6:
+            hints.append(f"{fq:.0f} Hz {db:.1f} dB — deep null; do NOT boost "
+                         "(nulls move with mic position)")
+    return _j({"name": name, "points": len(f),
+               "range": [float(f[0]), float(f[-1])],
+               "avg_spl": round(float(np.mean(m.spl)), 1),
+               "top_peaks": [{"hz": h, "db": d} for h, d in peaks],
+               "deepest_dips": [{"hz": h, "db": d} for h, d in dips],
+               "interpretation": hints})
+
+
+def get_eq() -> str:
+    return _j({"preamp": SESSION["preamp"],
+               "bands": [b.__dict__ for b in SESSION["bands"]]})
+
+
+def set_eq(bands: list[dict], preamp: float = 0.0,
+           write: bool = False) -> str:
+    from ..dsp.peq import PeqBand
+    parsed = []
+    for d in bands:
+        b = PeqBand(**{k: d.get(k, v) for k, v in
+                       PeqBand().__dict__.items()}).clipped()
+        parsed.append(b)
+    SESSION["bands"] = parsed
+    SESSION["preamp"] = max(-30.0, min(30.0, float(preamp)))
+    from ..dsp.peq import build_speakercorrect
+    preview = build_speakercorrect(parsed, SESSION["preamp"])
+    if not write:
+        return _j({"written": False, "preview": preview,
+                   "note": "Pass write=true to apply to Equalizer APO."})
+    import os
+    from ..dsp.apo_setup import find_config_dir, build_patched_config
+    d = find_config_dir()
+    if not d:
+        return _j({"error": "APO config dir not found",
+                   "preview": preview})
+    try:
+        with open(os.path.join(d, "speakercorrect.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(preview)
+        cfg = os.path.join(d, "config.txt")
+        cur = open(cfg, encoding="utf-8-sig", errors="replace").read() \
+            if os.path.isfile(cfg) else ""
+        new, _ = build_patched_config(cur, "speakercorrect.txt")
+        if new.strip() != cur.strip():
+            with open(cfg, "w", encoding="utf-8") as fh:
+                fh.write(new)
+        return _j({"written": True, "target": d,
+                   "include": "speakercorrect.txt",
+                   "preview": preview})
+    except OSError as e:
+        return _j({"error": f"write failed ({e}); run app as admin or copy "
+                            f"preview manually", "preview": preview})
+
+
+def verify_config() -> str:
+    from ..dsp.apo_setup import find_config_dir
+    from ..dsp.apo_semantics import verify
+    import os
+    d = find_config_dir()
+    if not d:
+        return _j({"error": "APO not installed"})
+    cfg = os.path.join(d, "config.txt")
+    text = open(cfg, encoding="utf-8-sig", errors="replace").read() \
+        if os.path.isfile(cfg) else ""
+    res = verify(text, base_dir=d)
+    return _j({"preamp_db": res.preamp_db, "steps_L": len(res.steps.get("L", [])),
+               "steps_R": len(res.steps.get("R", [])),
+               "warnings": res.warnings, "infos": res.infos})
+
+
+def measure_sweep(output: str, input: str, seconds: float = 5.0,
+                  confirm: bool = False) -> str:
+    """SIDE EFFECT: plays a sweep on `output` and records `input`.
+
+    Refuses unless confirm=true (AI must ask the human first).
+    """
+    if not confirm:
+        return _j({"refused": True,
+                   "note": "This plays sound through your speakers. "
+                           "Re-call with confirm=true after asking the user."})
+    try:
+        import numpy as np
+        from ..io.audio import play_rec
+        from ..dsp.measure import log_sweep, deconvolve, level_dbfs
+        fs = 48000
+        sweep = log_sweep(fs, float(seconds))
+        rec = play_rec(sweep, fs, output, input, float(seconds) + 2.0)
+        ir = deconvolve(rec, sweep, fs, ir_len=fs * 2)
+        n = len(SESSION["irs"])
+        SESSION["irs"][f"sweep#{n}"] = (fs, ir)
+        pk, rms = level_dbfs(rec)
+        return _j({"recorded": True, "rec_peak_dbfs": round(pk, 1),
+                   "rec_rms_dbfs": round(rms, 1), "ir_samples": len(ir),
+                   "note": "IR stored; time_align/design_fir unlocked."})
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}"})
+
+
+def time_align() -> str:
+    if len(SESSION["irs"]) < 2:
+        return _j({"error": "need >=2 IRs (import .wav files or measure)",
+                   "have": list(SESSION["irs"])})
+    try:
+        from ..dsp.align import estimate_delays, align_delays
+        rel = estimate_delays(SESSION["irs"])
+        apo = align_delays(SESSION["irs"])
+        return _j({"relative_ms": {k: round(v, 3) for k, v in rel.items()},
+                   "apo_delay_ms": {k: round(v, 3) for k, v in apo.items()},
+                   "note": "earliest onset = 0 ms; APO delays the EARLY "
+                           "channel(s) up to the latest."})
+    except ValueError as e:
+        return _j({"error": str(e)})
+
+
+def design_fir(taps: int = 4096, strength: float = 0.3,
+               below_hz: float = 300.0, save_wav: str = "") -> str:
+    if not SESSION["irs"]:
+        return _j({"error": "no IRs in session; import or measure first"})
+    try:
+        from ..dsp.fir import design_speaker_fir, FirParams, save_fir_wav
+        irs = list(SESSION["irs"].values())
+        fs_set = {fs for fs, _ in irs}
+        if len(fs_set) != 1:
+            return _j({"error": f"mixed sample rates {sorted(fs_set)}"})
+        p = FirParams(taps=int(taps), strength=max(0.0, min(1.0, strength)),
+                      phase_below_hz=float(below_hz))
+        rep = design_speaker_fir([x for _, x in irs], fs_set.pop(), p)
+        out = {"taps": rep.taps_n,
+               "latency_ms": round(rep.latency_ms, 2),
+               "pre_ring_db": round(rep.pre_ring_db, 1),
+               "peak_db": round(rep.peak_db, 1), "notes": rep.notes}
+        if save_wav:
+            save_fir_wav(save_wav, rep)
+            out["saved"] = save_wav
+        return _j(out)
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}"})
