@@ -224,10 +224,52 @@ def verify_config() -> str:
                "warnings": res.warnings, "infos": res.infos})
 
 
-def measure_sweep(output: str, input: str, seconds: float = 5.0,
-                  confirm: bool = False) -> str:
-    """SIDE EFFECT: plays a sweep on `output` and records `input`.
+def _noise_burst(fs: int, seconds: float, level: float = 0.25):
+    import numpy as np
+    rng = np.random.default_rng(20261010)
+    n = int(fs * seconds)
+    x = rng.standard_normal(n) * level * 0.5
+    fade = max(1, int(0.05 * fs))
+    ramp = np.hanning(fade * 2)[:fade]
+    x[:fade] *= ramp
+    x[-fade:] *= ramp[::-1]
+    return x
 
+
+def check_levels(output: str, input: str, seconds: float = 1.0,
+                 confirm: bool = False) -> str:
+    """SIDE EFFECT: plays a short noise burst and reports mic levels.
+
+    The REW-style procedure BEFORE any sweep: verify the mic hears the
+    speaker at a sane level. Refuses unless confirm=true.
+    """
+    if not confirm:
+        return _j({"refused": True,
+                   "note": "Plays a short noise burst. Re-call with "
+                           "confirm=true after asking the user."})
+    try:
+        from ..io.audio import play_rec
+        from ..dsp.measure import level_dbfs, level_verdict
+        fs = 48000
+        rec = play_rec(_noise_burst(fs, float(seconds)), fs,
+                       output, input, float(seconds) + 0.5)
+        pk, rms = level_dbfs(rec)
+        return _j({"played": True, "peak_dbfs": round(pk, 1),
+                   "rms_dbfs": round(rms, 1),
+                   "verdict": level_verdict(pk, rms),
+                   "thresholds": {"too_quiet_below": -50,
+                                   "clip_risk_above": -1}})
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}"})
+
+
+def measure_sweep(output: str, input: str, seconds: float = 5.0,
+                  confirm: bool = False,
+                  skip_level_check: bool = False) -> str:
+    """SIDE EFFECT: level-check burst, then a sweep (REW-style procedure).
+
+    1) noise burst -> mic must hear it (-50..-1 dBFS, else REFUSE)
+    2) log sweep -> deconvolved IR stored in session.
     Refuses unless confirm=true (AI must ask the human first).
     """
     if not confirm:
@@ -237,15 +279,32 @@ def measure_sweep(output: str, input: str, seconds: float = 5.0,
     try:
         import numpy as np
         from ..io.audio import play_rec
-        from ..dsp.measure import log_sweep, deconvolve, level_dbfs
+        from ..dsp.measure import (log_sweep, deconvolve, level_dbfs,
+                                   level_verdict)
         fs = 48000
+        levels = None
+        if not skip_level_check:
+            rec = play_rec(_noise_burst(fs, 1.0), fs, output, input, 1.5)
+            pk, rms = level_dbfs(rec)
+            levels = {"peak_dbfs": round(pk, 1), "rms_dbfs": round(rms, 1),
+                      "verdict": level_verdict(pk, rms)}
+            if pk < -50:
+                return _j({"refused": "level check FAILED: mic hears nothing "
+                           "(peak <-50 dBFS). Check devices/wiring/gain.",
+                           "levels": levels})
+            if pk >= -1.0:
+                return _j({"refused": "level check FAILED: clipping risk "
+                           "(peak >= -1 dBFS). Lower volume first.",
+                           "levels": levels})
         sweep = log_sweep(fs, float(seconds))
         rec = play_rec(sweep, fs, output, input, float(seconds) + 2.0)
         ir = deconvolve(rec, sweep, fs, ir_len=fs * 2)
         n = len(SESSION["irs"])
         SESSION["irs"][f"sweep#{n}"] = (fs, ir)
         pk, rms = level_dbfs(rec)
-        return _j({"recorded": True, "rec_peak_dbfs": round(pk, 1),
+        return _j({"recorded": True,
+                   "levels_precheck": levels,
+                   "rec_peak_dbfs": round(pk, 1),
                    "rec_rms_dbfs": round(rms, 1), "ir_samples": len(ir),
                    "note": "IR stored; time_align/design_fir unlocked."})
     except Exception as e:

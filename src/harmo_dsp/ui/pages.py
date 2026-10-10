@@ -99,15 +99,36 @@ class ImportPage(QWidget):
     def _refresh_devices(self):
         from ..io.audio import available, devices
         if not available():
-            self.m_hint.setText("⚠ sounddevice not installed → measurement disabled. "
-                                "Install: pip install sounddevice (everything else works).")
+            self.m_hint.setText("⚠ audio backend missing → measurement disabled. "
+                                "Install: pip install pyaudiowpatch (everything else works).")
             self.btn_level.setEnabled(False)
             self.btn_measure.setEnabled(False)
             return
         outs, ins = devices()
+        self.m_out.clear()
+        self.m_in.clear()
         self.m_out.addItems(outs or ["(no output device)"])
         self.m_in.addItems(ins or ["(no input device)"])
-        self.m_hint.setText("Quiet room, mic at ear position, one speaker at a time.")
+
+        def _preselect(combo, keywords):
+            for i in range(combo.count()):
+                t = combo.itemText(i).lower()
+                if all(k in t for k in keywords):
+                    combo.setCurrentIndex(i)
+                    return True
+            return False
+
+        # user rig heuristic: optical/USB audio first, generic digital/USB next
+        picked = (_preselect(self.m_out, ("digital", "realtek"))
+                  or _preselect(self.m_out, ("digital",))
+                  or _preselect(self.m_out, ("usb",)))
+        picked_in = (_preselect(self.m_in, ("usb", "microphone"))
+                     or _preselect(self.m_in, ("usb",)))
+        self.m_hint.setText(
+            "Pre-selected: digital/USB devices"
+            + ("" if picked else " (output guess failed — verify!)")
+            + ("" if picked_in else " (mic guess failed — verify!)")
+            + ". Quiet room, mic at ear position, one speaker at a time.")
 
     def _check_levels(self):
         from ..io.audio import record_only

@@ -55,6 +55,40 @@ def test_measure_sweep_refuses_without_confirm():
     assert r["refused"] is True  # never a side effect without consent
 
 
+def test_check_levels_gate_and_procedure(monkeypatch):
+    _reset()
+    r = json.loads(T.check_levels("0: x", "1: y"))
+    assert r["refused"] is True  # gate first
+    # too-quiet mic => sweep must refuse BEFORE playing the sweep
+    from harmo_dsp.io import audio as A
+    calls = []
+
+    def fake_quiet(sweep, fs, out, inp, seconds):
+        calls.append("x")
+        import numpy as np
+        return np.zeros(int(seconds * fs))
+
+    monkeypatch.setattr(A, "play_rec", fake_quiet)
+    r2 = json.loads(T.measure_sweep("0: x", "1: y", confirm=True))
+    assert r2["refused"] and "level check FAILED" in r2["refused"]
+    assert len(calls) == 1  # burst only — sweep never played
+
+
+def test_measure_sweep_proceeds_after_good_level(monkeypatch):
+    _reset()
+    import numpy as np
+    from harmo_dsp.io import audio as A
+    from harmo_dsp.dsp.measure import log_sweep
+
+    def fake(sweep, fs, out, inp, seconds):
+        return np.asarray(sweep[:int(seconds * fs)]) * 0.5
+
+    monkeypatch.setattr(A, "play_rec", fake)
+    r = json.loads(T.measure_sweep("0: x", "1: y", seconds=1.0, confirm=True))
+    assert r.get("recorded") is True
+    assert r["levels_precheck"]["verdict"].startswith("OK")
+
+
 def test_backend_and_meter_never_crash():
     r = json.loads(T.check_backend())
     assert "versions" in r and "apo" in r
@@ -73,8 +107,29 @@ def test_inmemory_client_lists_and_calls_tools():
             tools = await c.list_tools()
             names = [t.name for t in tools]
             assert "check_backend" in names and "set_eq" in names
+            assert "check_levels" in names  # REW-style pre-procedure
             res = await c.call_tool("check_backend", {})
             data = json.loads(res.content[0].text)
             assert "versions" in data
 
     asyncio.run(_run())
+
+
+def test_gui_measurement_panel_preselects_rig(monkeypatch):
+    import os
+    from PySide6.QtWidgets import QApplication
+    from harmo_dsp.ui.pages import ImportPage
+    from harmo_dsp.io import audio as A
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(A, "available", lambda: True)
+    monkeypatch.setattr(
+        A, "devices",
+        lambda: (["3: Sound Mapper", "4: Realtek Digital Output (Realtek(R) Audio)",
+                  "5: Speakers (USB)"],
+                 ["0: Sound Mapper In", "1: Microphone (3- USB Audio Device)",
+                  "2: DroidCam"]))
+    p = ImportPage()
+    assert "4: Realtek Digital" in p.m_out.currentText()
+    assert "USB Audio" in p.m_in.currentText()
+    p.close()
