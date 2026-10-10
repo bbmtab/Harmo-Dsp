@@ -123,6 +123,7 @@ class FirParams:
     boost_max_db: float = 6.0
     cut_max_db: float = 30.0
     target_db: float = 0.0     # flat target level (tilt = future)
+    phase_only: bool = False   # PEQ already does magnitude? -> FIR touches PHASE only
 
 
 def design_mag_only(avg_mag: np.ndarray, n: int, fs: float,
@@ -164,7 +165,14 @@ def design_speaker_fir(irs: list[np.ndarray], fs: int,
     if (weight < 0.2).mean() > 0.7:
         notes.append("Low inter-position consistency — correction mostly skipped (safe).")
 
-    h_min = design_mag_only(mean_mag, n, fs, p, weight)
+    if p.phase_only:
+        # magnitude is the PEQ's job (user said mids/highs are fine):
+        # delta kernel -> the FIR convolves ONLY the excess-phase part
+        h_min = np.zeros(p.taps)
+        h_min[0] = 1.0
+        notes.append("phase-only mode: magnitude untouched (PEQ owns it)")
+    else:
+        h_min = design_mag_only(mean_mag, n, fs, p, weight)
 
     if p.strength <= 0.0:
         h = h_min  # identical to the minimum-phase path, by construction

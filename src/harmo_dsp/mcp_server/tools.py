@@ -365,11 +365,11 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
             max_cut: float = 8.0, fit_lo: float = 30.0,
             fit_hi: float = 8000.0,
             write: bool = False, listen_approved: bool = False,
-            name: str = "") -> str:
-    """Dirac-style auto-correction: flatten session measurement toward
-    the target. fit_lo/fit_hi restrict WHERE it corrects (e.g. user
-    says mids/highs are fine -> fit 25..150 Hz only, deep cuts allowed).
-    Write requires >=15% improvement AND listen_approved=true.
+            fir_wav: str = "", name: str = "") -> str:
+    """Dirac-style correction: PEQ toward target + optional phase-only FIR
+    (fir_wav from design_fir) in ONE write (bands + Convolution + Include).
+    fit_lo/fit_hi restrict WHERE it corrects. Write requires >=15%
+    improvement AND listen_approved=true.
     """
     import numpy as np
     # 1) pick the curve: named measurement, latest measurement, or last IR
@@ -432,15 +432,27 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
         out["note"] = "Preview only — re-call with write=true to apply."
         return _j(out)
     import os
+    from ..dsp.apo_config import ApoOutput, render_speakercorrect
     from ..dsp.apo_setup import find_config_dir, build_patched_config
     d = find_config_dir()
     if not d:
         out["error"] = "APO config dir not found"
         return _j(out)
+    conv = {}
+    if fir_wav:
+        try:
+            from scipy.io.wavfile import read as _wr
+            _fs, _ = _wr(fir_wav)
+            conv[int(_fs)] = os.path.abspath(fir_wav)
+            out["convolution"] = conv
+        except Exception as e:
+            out["convolution_error"] = f"{type(e).__name__}: {e}"
+    full = render_speakercorrect(ApoOutput(
+        preamp_db=SESSION["preamp"], bands=bands, convolution=conv))
     try:
         with open(os.path.join(d, "speakercorrect.txt"), "w",
                   encoding="utf-8") as fh:
-            fh.write(preview)
+            fh.write(full)
         cfg = os.path.join(d, "config.txt")
         cur = open(cfg, encoding="utf-8-sig", errors="replace").read() \
             if os.path.isfile(cfg) else ""
@@ -473,7 +485,13 @@ def time_align() -> str:
 
 
 def design_fir(taps: int = 4096, strength: float = 0.3,
-               below_hz: float = 300.0, save_wav: str = "") -> str:
+               below_hz: float = 300.0, save_wav: str = "",
+               phase_only: bool = False) -> str:
+    """Design the phase-correction FIR (rePhase-equivalent, in-house).
+
+    phase_only=true when PEQ already handles magnitude: the FIR then
+    corrects ONLY excess phase (below below_hz, scaled by strength).
+    """
     if not SESSION["irs"]:
         return _j({"error": "no IRs in session; import or measure first"})
     try:
@@ -483,7 +501,8 @@ def design_fir(taps: int = 4096, strength: float = 0.3,
         if len(fs_set) != 1:
             return _j({"error": f"mixed sample rates {sorted(fs_set)}"})
         p = FirParams(taps=int(taps), strength=max(0.0, min(1.0, strength)),
-                      phase_below_hz=float(below_hz))
+                      phase_below_hz=float(below_hz),
+                      phase_only=bool(phase_only))
         rep = design_speaker_fir([x for _, x in irs], fs_set.pop(), p)
         out = {"taps": rep.taps_n,
                "latency_ms": round(rep.latency_ms, 2),
