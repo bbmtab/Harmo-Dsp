@@ -406,7 +406,15 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
            "worst_boost_db": round(worst_boost, 1),
            "preamp_set": SESSION["preamp"],
            "bands": [b.__dict__ for b in bands],
-           "preview": preview if not write else None}
+           "preview": preview}
+    if write and imp < 0.15:
+        # quality gate: a correction that does not clearly help is
+        # measurement noise (low mic level / bad SNR), NOT a room curve.
+        out["written"] = False
+        out["refused"] = (f"improvement {imp*100:.1f}% < 15% — measurement "
+                          f"SNR too low. Raise speaker volume / mic gain, "
+                          f"re-measure, retry. Nothing was written.")
+        return _j(out)
     if not write:
         out["written"] = False
         out["note"] = "Preview only — re-call with write=true to apply."

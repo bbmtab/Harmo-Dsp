@@ -32,6 +32,7 @@ class SolverParams:
     fit_hi: float = 8000.0
     stop_db: float = 1.0
     null_guard_db: float = -12.0  # dips deeper than this are NEVER boosted
+    smooth_frac_oct: float = 1.0 / 6.0  # 0 = off; tames LF noise spikes
 
 
 def _biquad_db(b: PeqBand, f: np.ndarray, fs: float) -> np.ndarray:
@@ -63,6 +64,22 @@ def _bw_oct_to_q(bw: float) -> float:
     return 1.0 / (2.0 * math.sinh(math.log(2.0) / 2.0 * max(bw, 1e-3)))
 
 
+def _smooth_log(f: np.ndarray, y: np.ndarray, frac_oct: float) -> np.ndarray:
+    """Moving average ~frac_oct wide on the log-frequency axis (tames
+    narrow measurement noise, especially at LF where SNR is worst)."""
+    import numpy as np
+    n = len(f)
+    if n < 8 or frac_oct <= 0:
+        return y
+    span_oct = float(np.log2(f[-1] / f[0]))
+    pts_per_oct = max(1.0, n / max(span_oct, 1e-6))
+    w = max(3, int(round(pts_per_oct * frac_oct)) | 1)
+    k = np.ones(w) / w
+    pad = w // 2
+    padded = np.concatenate([np.full(pad, y[0]), y, np.full(pad, y[-1])])
+    return np.convolve(padded, k, mode="valid")
+
+
 def solve_peq(freqs, db, target=None, p: SolverParams | None = None,
               fs: float = 48000.0) -> tuple[list[PeqBand], dict]:
     """Returns (bands, report). `db` may be any absolute level — it is
@@ -70,6 +87,8 @@ def solve_peq(freqs, db, target=None, p: SolverParams | None = None,
     p = p or SolverParams()
     f = np.maximum(np.asarray(freqs, dtype=np.float64), 1e-3)
     y = np.asarray(db, dtype=np.float64)
+    if p.smooth_frac_oct > 0:
+        y = _smooth_log(f, y, p.smooth_frac_oct)
     lvl_mask = (f >= 200) & (f <= 2000)
     ref = float(np.median(y[lvl_mask])) if lvl_mask.sum() > 3 \
         else float(np.median(y))
