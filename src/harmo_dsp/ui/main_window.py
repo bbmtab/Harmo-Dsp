@@ -77,7 +77,6 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(p)
         self.page_export.set_source(self.page_tune)
         self.page_import.set_target(self.page_tune)
-        self.page_tune.auto_enable_live()  # Live ON at start when capable
         split.addWidget(self.nav)
         split.addWidget(self.stack)
         split.setStretchFactor(0, 0)
@@ -102,6 +101,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "v1: Stereo 2.0 / 2.1 only  •  5.1 / 7.1 / Headphone = Future (TODO)  •  All processing local, no upload"
         )
+        # LAST: parent chain is complete now, so auto_enable_live's
+        # self.window() resolves to MainWindow (regression hotfix).
+        self.page_tune.auto_enable_live()
 
     def _app(self):
         from PySide6.QtWidgets import QApplication
