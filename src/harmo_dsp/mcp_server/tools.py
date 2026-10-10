@@ -508,6 +508,28 @@ def push_ir_to_rew(name: str = "", save_dir: str = "") -> str:
                        "REW sees OUR sweep."})
 
 
+def export_ir(name: str = "", path: str = "") -> str:
+    """Write a session IR to disk (WAV float32): for archiving, REW
+    import, DRC-FIR input, or Gate-3 evidence. No sound, no config."""
+    irs = SESSION["irs"]
+    if not irs:
+        return _j({"error": "no IR in session — measure_sweep first"})
+    key = name if name and name in irs else list(irs)[-1]
+    fs, x = irs[key]
+    import os
+    import tempfile
+    import numpy as np
+    from scipy.io.wavfile import write as wavwrite
+    out = path or os.path.join(tempfile.gettempdir(),
+                               f"harmo-{key.replace('#', '_')}.wav")
+    try:
+        wavwrite(out, int(fs), np.asarray(x, dtype=np.float32))
+    except OSError as e:
+        return _j({"error": f"write failed: {e}"})
+    return _j({"exported": out, "name": key, "fs": int(fs),
+               "samples": int(len(x))})
+
+
 def time_align() -> str:
     """Estimate inter-channel delays from session IR onsets (needs >=2)."""
     if len(SESSION["irs"]) < 2:

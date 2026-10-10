@@ -124,6 +124,21 @@ def test_backend_and_meter_never_crash():
     assert m["status"] in ("live", "silent", "unavailable", "error")
 
 
+def test_export_ir_roundtrip(tmp_path):
+    _reset()
+    import numpy as np
+    T.SESSION["irs"]["sweep#0"] = (48000, np.zeros(512))
+    T.SESSION["irs"]["sweep#0"][1][10] = 1.0
+    import json
+    r = json.loads(T.export_ir(path=str(tmp_path / "out.wav")))
+    assert r["exported"].endswith("out.wav") and r["samples"] == 512
+    r2 = json.loads(T.export_ir(name="nope"))
+    assert "sweep_0" in r2["exported"]  # falls back to latest (# sanitized)
+    _reset()
+    r3 = json.loads(T.export_ir())
+    assert "error" in r3
+
+
 def test_inmemory_client_lists_and_calls_tools():
     import asyncio
 
@@ -136,6 +151,7 @@ def test_inmemory_client_lists_and_calls_tools():
             names = [t.name for t in tools]
             assert "check_backend" in names and "set_eq" in names
             assert "check_levels" in names  # REW-style pre-procedure
+            assert "export_ir" in names and "push_ir_to_rew" in names
             res = await c.call_tool("check_backend", {})
             data = json.loads(res.content[0].text)
             assert "versions" in data
