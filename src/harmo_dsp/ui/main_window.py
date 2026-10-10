@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         bar.setMovable(False)
         self.addToolBar(bar)
         self.channels = ChannelSelector()
+        self.channels.changed.connect(self._mode_note)
         bar.addWidget(self.channels)
         bar.addSeparator()
         self.btn_theme = QPushButton("🌗  Dark / Light")
@@ -105,6 +106,19 @@ class MainWindow(QMainWindow):
     def _app(self):
         from PySide6.QtWidgets import QApplication
         return QApplication.instance()
+
+    def _mode_note(self, key: str):
+        """Honest per-mode facts in the status bar (no silent no-ops)."""
+        notes = {
+            "stereo20":
+                "2.0: file = Channel L + R. Your optical setup: leave Delay 0/0.",
+            "stereo21":
+                "2.1: v1 writes the SAME L/R file. Sub tips: Delay aligns sub "
+                "(1 ms ≈ 34 cm); keep bass filters on ALL channels (APO docs: "
+                "bass redirect happens AFTER APO).",
+        }
+        msg = notes.get(key, "Mode: " + key)
+        self.statusBar().showMessage(msg, 15000)
 
     def _toggle_theme(self):
         mode = self.theme.toggle()

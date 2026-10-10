@@ -39,7 +39,18 @@ class AudioDevice:
     attached: bool = False
     is_default: bool = False
     disabled: bool = False
+    active: bool = False  # DeviceState == 1 (plugged in & enabled)
     originals: dict[str, str | None] = field(default_factory=dict)
+
+
+def _read_reg_dword(root, path: str, name: str) -> int | None:
+    try:
+        import winreg
+        with winreg.OpenKey(root, path, 0, winreg.KEY_READ) as k:
+            val, _ = winreg.QueryValueEx(k, name)
+            return int(val)
+    except OSError:
+        return None
 
 
 def _read_reg_str(root, path: str, name: str) -> str | None:
@@ -68,8 +79,9 @@ def enumerate_devices() -> list[AudioDevice]:
     except OSError:
         return []
     for g in guids:
-        props = base + "\\" + g + "\\Properties"
-        fx = base + "\\" + g + "\\FxProperties"
+        key_base = base + "\\" + g
+        props = key_base + "\\Properties"
+        fx = key_base + "\\FxProperties"
         conn = _read_reg_str(winreg.HKEY_LOCAL_MACHINE, props,
                              "{a45c254e-df1c-4efd-8020-67d146a850e0},2") or ""
         dev = _read_reg_str(winreg.HKEY_LOCAL_MACHINE, props,
@@ -82,7 +94,11 @@ def enumerate_devices() -> list[AudioDevice]:
             originals[slot] = v
             if v and v.upper() in APO_GUIDS:
                 attached = True
-        devs.append(AudioDevice(g, name, attached, False, False, originals))
+        state = _read_reg_dword(winreg.HKEY_LOCAL_MACHINE, key_base,
+                                "DeviceState")
+        active = (state == 1)  # 1 = plugged in & enabled
+        devs.append(AudioDevice(g, name, attached, False, False, active,
+                                originals))
     default = default_device_guid()
     for d in devs:
         d.is_default = (d.guid.upper() == default.upper()) if default else False

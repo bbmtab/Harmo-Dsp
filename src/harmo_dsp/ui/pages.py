@@ -509,8 +509,11 @@ class FineTunePage(QWidget):
                 None, "runas", sys.executable, "-m harmo_dsp", None, 1)
             if rc <= 32:
                 raise OSError(f"elevated relaunch failed (code {rc})")
-            QMessageBox.information(self, "Admin",
-                                    "Elevated copy is starting — close THIS window and use that one.")
+            QMessageBox.information(
+                self, "Admin",
+                "Elevated window is starting — this one closes now "
+                "(so you never stare at a stale Live-OFF window).")
+            self.window().close()  # single-window UX after admin restart
         except Exception as e:
             QMessageBox.warning(self, "Admin", f"Cannot relaunch elevated:\n{e}")
 
@@ -891,10 +894,19 @@ class ExportPage(QWidget):
         if not devs:
             self.dev_combo.addItem("(no playback devices / non-Windows)", "")
             return
+        best = None
         for d in devs:
             mark = "✓" if d.attached else "✗"
+            star = " ★" if d.active else ""
             default = " [default]" if d.is_default else ""
-            self.dev_combo.addItem(f"{mark} {d.name}{default}", d.guid)
+            idx = self.dev_combo.addItem(f"{mark} {d.name}{star}{default}", d.guid)
+            if d.attached and d.active and best is None:
+                best = idx
+        if best is not None:
+            self.dev_combo.setCurrentIndex(best)
+            self.dev_combo.setToolTip(
+                "Pre-selected: your ACTIVE speaker with APO attached (★ = plugged in).\n"
+                "Pick others only if you know they need APO too.")
 
     def _attach_device(self):
         import os
