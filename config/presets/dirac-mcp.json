@@ -1,0 +1,44 @@
+{
+  "app": "Harmo-Dsp",
+  "v": 2,
+  "name": "dirac-mcp (measured sweep)",
+  "preamp": 0.0,
+  "bands": [
+    {
+      "on": true,
+      "type": "PK",
+      "fc": 51.61,
+      "gain": -12.0,
+      "q": 3.20798,
+      "t60": 100.0,
+      "ch": "all"
+    },
+    {
+      "on": true,
+      "type": "PK",
+      "fc": 52.36,
+      "gain": -6.79223,
+      "q": 2.93346,
+      "t60": 100.0,
+      "ch": "all"
+    },
+    {
+      "on": true,
+      "type": "PK",
+      "fc": 78.45,
+      "gain": -2.19932,
+      "q": 5.0,
+      "t60": 100.0,
+      "ch": "all"
+    },
+    {
+      "on": true,
+      "type": "PK",
+      "fc": 61.37,
+      "gain": -1.47486,
+      "q": 5.0,
+      "t60": 100.0,
+      "ch": "all"
+    }
+  ]
+}
