@@ -470,7 +470,42 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
         return _j(out)
 
 
-def time_align() -> str:
+def push_ir_to_rew(name: str = "", save_dir: str = "") -> str:
+    """Push OUR measured IR into REW's GUI via its import API (free
+    endpoint). After this the sweep IS visible in REW: analyse it there,
+    or let our auto_eq process it. Bridges both worlds."""
+    irs = SESSION["irs"]
+    if not irs:
+        return _j({"error": "no IR in session — measure_sweep first"})
+    key = name if name and name in irs else list(irs)[-1]
+    fs, x = irs[key]
+    import os
+    import tempfile
+    import urllib.request
+    import urllib.error
+    import numpy as np
+    from scipy.io.wavfile import write as wavwrite
+    d = save_dir or tempfile.gettempdir()
+    path = os.path.join(d, f"harmo-{key.replace('#', '_')}.wav")
+    wavwrite(path, int(fs), np.asarray(x, dtype=np.float32))
+    body = json.dumps({"path": path.replace("\\", "/"),
+                       "channels": "All"}).encode()
+    req = urllib.request.Request(
+        "http://127.0.0.1:4735/import/impulse-response", data=body,
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            status = r.status
+    except urllib.error.HTTPError as e:
+        return _j({"error": f"REW refused ({e.code}): "
+                            f"{e.read(200)!r}. Is REW 5.40+ running with API?",
+                   "wav": path})
+    except Exception as e:
+        return _j({"error": f"{type(e).__name__}: {e}. Is REW running?",
+                   "wav": path})
+    return _j({"pushed": True, "wav": path, "rew_status": status,
+               "note": "Look at REW: the IR is now a measurement there. "
+                       "REW sees OUR sweep."})
     if len(SESSION["irs"]) < 2:
         return _j({"error": "need >=2 IRs (import .wav files or measure)",
                    "have": list(SESSION["irs"])})
