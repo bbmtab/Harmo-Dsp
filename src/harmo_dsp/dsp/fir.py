@@ -25,7 +25,9 @@ from scipy.signal import freqz
 # (lo_hz, hi_hz, window_ms): long windows for bass, short for treble
 DEFAULT_BAND_WINDOWS = [(10.0, 150.0, 40.0), (150.0, 1200.0, 20.0),
                         (1200.0, 24000.0, 5.0)]
-NULL_DEPTH_DB = 40.0
+# NOTE: the old global NULL_DEPTH_DB gate (40 dB below the global peak)
+# was removed: a monster room mode vetoed phase work everywhere else.
+# Nulls are now detected vs the LOCAL envelope (see design_speaker_fir).
 
 
 def _next_pow2(n: int) -> int:
@@ -160,7 +162,15 @@ def design_speaker_fir(irs: list[np.ndarray], fs: int,
     with np.errstate(divide="ignore"):
         mag_db = 20.0 * np.log10(np.maximum(mean_mag, 1e-12))
     consistency = 1.0 / (1.0 + 3.0 * cv)
-    null_gate = np.clip((mag_db - (peak_db - NULL_DEPTH_DB)) / 20.0, 0.0, 1.0)
+    # Null gate vs the LOCAL envelope (not the global peak): a monster
+    # room mode (+30 dB) must not veto phase work in neighbouring bands.
+    # Bins >25 dB below their ~100-bin neighbourhood are true nulls.
+    _w = 101
+    _pad = _w // 2
+    _padded = np.concatenate([np.full(_pad, mag_db[0]), mag_db,
+                              np.full(_pad, mag_db[-1])])
+    _env = np.convolve(_padded, np.ones(_w) / _w, mode="valid")
+    null_gate = np.clip((mag_db - (_env - 25.0)) / 10.0, 0.0, 1.0)
     weight = consistency * null_gate
     if (weight < 0.2).mean() > 0.7:
         notes.append("Low inter-position consistency — correction mostly skipped (safe).")
