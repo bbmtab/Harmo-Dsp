@@ -297,9 +297,12 @@ try:
             super().__init__(parent)
             lay = QHBoxLayout(self)
             lay.setContentsMargins(6, 0, 6, 0)
-            icon = QLabel("🔊")
-            icon.setToolTip("Windows output level (all apps). Red = near clip.")
-            lay.addWidget(icon)
+            self.btn = QPushButton("🔇")
+            self.btn.setCheckable(True)
+            self.btn.setToolTip("Output meter (Peace-style). OFF by default: opening the "
+                                "loopback stream can glitch S/PDIF optical links. Click to enable.")
+            self.btn.toggled.connect(self._toggle)
+            lay.addWidget(self.btn)
             self.bar = QProgressBar()
             self.bar.setRange(-600, 0)  # x10 dB: -60.0..0.0
             self.bar.setValue(-600)
@@ -315,8 +318,14 @@ try:
             self.timer = QTimer(self)
             self.timer.setInterval(120)
             self.timer.timeout.connect(self._tick)
-            self.timer.start()
-            self.setToolTip("Output peak of the default playback device (like Peace's meter).")
+            # REGRESSION FIX: do NOT auto-start — no loopback stream is
+            # opened until the user opts in (S/PDIF glitch evidence).
+            self.setToolTip("Output peak of the default playback device "
+                            "(like Peace's meter). Click the icon to start.")
+
+        def _toggle(self, on: bool):
+            self.btn.setText("🔊" if on else "🔇")
+            self.timer.start() if on else self.timer.stop()
 
         def _tick(self):
             import time

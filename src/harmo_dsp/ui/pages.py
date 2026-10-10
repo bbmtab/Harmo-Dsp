@@ -596,8 +596,12 @@ class FineTunePage(QWidget):
         self.schedule_live_write()
 
     def auto_enable_live(self):
-        """Live ON at startup when capable (user demand). No dialogs unless
-        the Include line is actually missing (one-time wiring question)."""
+        """Live ON at startup ONLY when the user already wired the Include.
+
+        REGRESSION FIX: this used to silently patch config.txt (re-adding
+        Include behind the user's back — brief rule 6 violation, and the
+        noise trigger). Now: no Include on disk => hint, zero writes.
+        """
         import os
         if os.environ.get("HARMO_NO_AUTOLIVE"):
             return  # tests / headless: never show dialogs
@@ -609,8 +613,18 @@ class FineTunePage(QWidget):
             self.btn_admin.setVisible(True)
             self.btn_live.setText("⚪ Live: OFF (need admin)")
             return
-        self.btn_live.setChecked(True)  # fires _live_toggled (setup + write)
-        exp.log.appendPlainText("• Live auto-enabled at startup (APO folder writable, Include wired).")
+        from ..dsp.apo_setup import read_config, find_config_dir
+        cfg = read_config(find_config_dir() or "")
+        if "speakercorrect" not in cfg.lower():
+            self.btn_live.setText("⚪ Live: OFF (Step 5 → Write once)")
+            self.btn_live.setToolTip("Include is NOT in config.txt. Press "
+                                     "💾 Write in Step 5 (with its backup + "
+                                     "confirm) to wire it — auto-enable "
+                                     "will never touch your config itself.")
+            return
+        self.btn_live.setChecked(True)
+        exp.log.appendPlainText("• Live auto-enabled (Include already wired, "
+                                "APO folder writable).")
 
     def schedule_live_write(self):
         """Debounced auto-write (called on every EQ change while Live is ON)."""

@@ -19,10 +19,14 @@ def test_output_meter_none_and_fake_peak(monkeypatch):
 
     QApplication.instance() or QApplication([])
     m = OutputMeter()
+    # REGRESSION FIX: no polling (and no loopback stream) until opt-in
+    assert not m.timer.isActive()
     monkeypatch.setattr(M, "get_output_peak", lambda: None)
-    m._tick()
-    assert m.db_label.text() == "— dB"  # unavailable => dim, no crash
-    monkeypatch.setattr(M, "get_output_peak", lambda: 0.0)  # alive, silent
+    m._tick()  # manual tick still safe when off
+    assert m.db_label.text() == "— dB"
+    m.btn.setChecked(True)  # user opts in -> polling starts
+    assert m.timer.isActive()
+    monkeypatch.setattr(M, "get_output_peak", lambda: 0.0)
     m._tick()
     assert m.db_label.text() == "silent"
     assert m._available_seen
@@ -43,5 +47,7 @@ def test_meter_in_main_toolbar():
     QApplication.instance() or QApplication([])
     w = MainWindow()
     assert hasattr(w, "out_meter")
-    w.out_meter._tick()  # real backend call: None on headless, never crash
+    assert not w.out_meter.timer.isActive()  # launch is audio-silent
+    w.out_meter.btn.setChecked(True)
+    w.out_meter._tick()
     w.close()
