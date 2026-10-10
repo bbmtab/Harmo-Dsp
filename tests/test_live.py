@@ -88,6 +88,27 @@ def test_disk_label_marks_outdated(tmp_path):
     w.close()
 
 
+def test_live_write_never_clobbers_nonempty_file(tmp_path):
+    """Empty GUI + non-empty disk (e.g. MCP result) => write REFUSED."""
+    from harmo_dsp.dsp.peq import build_speakercorrect, PeqBand
+    w, tune, exp = _pages()
+    exp._apo_dir = str(tmp_path)
+    # a correction sits on disk (like an MCP auto_eq write)
+    bands = [PeqBand(True, "PK", 56.6, -15.0, 3.8)]
+    (tmp_path / "speakercorrect.txt").write_text(
+        build_speakercorrect(bands, 0.0), encoding="utf-8")
+    before = (tmp_path / "speakercorrect.txt").read_text(encoding="utf-8")
+    # GUI is EMPTY (fresh launch, no preset loaded) -> live_write must skip
+    assert not exp.live_write()
+    assert (tmp_path / "speakercorrect.txt").read_text(encoding="utf-8") == before
+    # intentional bypass = allowed to flatten
+    tune.btn_ab.setChecked(True)
+    assert exp.live_write()
+    after = (tmp_path / "speakercorrect.txt").read_text(encoding="utf-8")
+    assert "Filter:" not in after
+    w.close()
+
+
 def test_include_idempotent():
     from harmo_dsp.dsp.apo_setup import build_patched_config
     cur = "# Convolution: Agu 31 20_51_21-filters-48k.wav\nInclude: speakercorrect.txt\n"

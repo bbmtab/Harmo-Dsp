@@ -923,7 +923,13 @@ class ExportPage(QWidget):
         return True
 
     def live_write(self) -> bool:
-        """Silent debounced write of current EQ (Live mode)."""
+        """Silent debounced write of current EQ (Live mode).
+
+        GUARD: never clobber a non-empty correction file with an EMPTY
+        GUI state (e.g. fresh launch before loading the preset) — that
+        accident class destroyed an MCP result once. Bypass toggle is
+        the intentional way to go flat.
+        """
         import os
         from datetime import datetime
         from ..dsp.apo_config import render_speakercorrect, OUR_FILENAME
@@ -934,9 +940,26 @@ class ExportPage(QWidget):
         target_dir = info
         if self._tune is None:
             return False
+        txt = render_speakercorrect(self._collect_output())
+        bypass_intentional = self._tune.btn_ab.isChecked()
+        empty_state = ("Filter:" not in txt and "GraphicEQ:" not in txt
+                       and "Convolution:" not in txt)
+        disk_path = os.path.join(target_dir, OUR_FILENAME)
+        if empty_state and not bypass_intentional and os.path.isfile(disk_path):
+            with open(disk_path, encoding="utf-8", errors="replace") as fh:
+                disk_txt = fh.read()
+            disk_has = ("Filter:" in disk_txt or "GraphicEQ:" in disk_txt
+                        or "Convolution:" in disk_txt)
+            if disk_has:
+                self.log.appendPlainText(
+                    "• Live write SKIPPED: editor is empty but the file on "
+                    "disk holds a correction (e.g. from MCP). Load it first "
+                    "(📂 Load preset / re-run auto_eq), or toggle A/B "
+                    "bypass to go flat intentionally.")
+                return False
         try:
             with open(os.path.join(target_dir, OUR_FILENAME), "w", encoding="utf-8") as fh:
-                fh.write(render_speakercorrect(self._collect_output()))
+                fh.write(txt)
             self.log.appendPlainText(
                 f"🔴 Live {datetime.now():%H:%M:%S} — APO reloads automatically.")
             return True
