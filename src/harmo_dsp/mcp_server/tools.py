@@ -362,14 +362,14 @@ def save_graph(path: str, name: str = "") -> str:
 
 def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
             max_bands: int = 10, max_boost: float = 6.0,
+            max_cut: float = 8.0, fit_lo: float = 30.0,
+            fit_hi: float = 8000.0,
             write: bool = False, listen_approved: bool = False,
             name: str = "") -> str:
     """Dirac-style auto-correction: flatten session measurement toward
-    the target (default: bass +3 dB below 80 Hz, mids/highs flat).
-
-    Cuts peaks; never boosts nulls; high Q only in bass. Write requires
-    BOTH >=15% measured improvement AND listen_approved=true (the user
-    must have heard the preview and said OK — numbers alone have lied).
+    the target. fit_lo/fit_hi restrict WHERE it corrects (e.g. user
+    says mids/highs are fine -> fit 25..150 Hz only, deep cuts allowed).
+    Write requires >=15% improvement AND listen_approved=true.
     """
     import numpy as np
     # 1) pick the curve: named measurement, latest measurement, or last IR
@@ -393,7 +393,9 @@ def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
     from ..dsp.peq import build_speakercorrect
     tgt = preset_curve(f, target, corner_hz=corner_hz)
     bands, rep = solve_peq(f, db, tgt, SolverParams(
-        max_bands=int(max_bands), max_boost=float(max_boost)), fs=48000.0)
+        max_bands=int(max_bands), max_boost=float(max_boost),
+        max_cut=float(max_cut), fit_lo=float(fit_lo),
+        fit_hi=float(fit_hi)), fs=48000.0)
     SESSION["bands"] = bands
     worst_boost = max((b.gain for b in bands), default=0.0)
     SESSION["preamp"] = -worst_boost if worst_boost > 0 else 0.0

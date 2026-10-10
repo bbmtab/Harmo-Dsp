@@ -161,62 +161,54 @@ class ImportPage(QWidget):
             + ("" if picked_in else " (mic guess failed — verify!)")
             + ". Quiet room, mic at ear position, one speaker at a time.")
 
-    def _check_levels(self, log=None):
-        """Synchronous core (log callback injectable for threads/tests)."""
-        log = log or self.log.appendPlainText
+    def _check_levels_core(self, inp: str, log):
+        """Thread-safe: NO widget access (labels passed in)."""
         from ..io.audio import record_only
         from ..dsp.measure import level_dbfs, level_verdict
         try:
-            x = record_only(48000, self.m_in.currentText(), 1.0)
+            x = record_only(48000, inp, 1.0)
             pk, rms = level_dbfs(x)
             log(f"Levels: peak {pk:.1f} dBFS, RMS {rms:.1f} — {level_verdict(pk, rms)}")
         except Exception as e:
             log(f"⚠ Level check failed: {e}")
 
-    def _measure_once(self, log=None, done=None):
-        """Synchronous core: sweep -> IR -> session; UI updates via
-        `log` (lines) and `done` (curve dict) so a worker thread can
-        drive it without touching widgets from the wrong thread."""
-        log = log or self.log.appendPlainText
+    def _measure_core(self, params: dict, sess, log, done):
+        """Thread-safe: sweep -> IR -> session; all UI via callbacks."""
         from ..io.audio import play_rec
-        from ..dsp.measure import log_sweep, deconvolve, level_dbfs
-        dur = int(self.m_dur.currentText().split()[0])
+        from ..dsp.measure import log_sweep, deconvolve, level_dbfs, ir_freq_response
         fs = 48000
+        dur = params["dur"]
+        ch, pos = params["ch"], params["pos"]
         try:
             sweep = log_sweep(fs, dur)
-            log(f"● Playing {dur}s sweep on {self.m_ch.currentText()}… stay quiet.")
-            rec = play_rec(sweep, fs, self.m_out.currentText(),
-                           self.m_in.currentText(), dur + 2.0)
+            log(f"● Playing {dur}s sweep on {ch}… stay quiet.")
+            rec = play_rec(sweep, fs, params["out"], params["inp"],
+                           dur + 2.0)
             ir = deconvolve(rec, sweep, fs, ir_len=fs * 2)
             pk, _ = level_dbfs(rec)
-            key = (self.m_ch.currentText(), int(self.m_pos.value()) - 1)
-            win = self.window()
-            sess = getattr(win, "session", None)
+            key = (ch, pos - 1)
             if sess is not None:
                 sess.setdefault("ir", {})[key] = (fs, ir)
-            from ..dsp.measure import ir_freq_response
             fgrid, dbcurve = ir_freq_response(ir, fs)
-            log(f"✓ IR {key[0]} pos {key[1] + 1}: {len(ir)} samples @ {fs} Hz "
+            log(f"✓ IR {ch} pos {pos}: {len(ir)} samples @ {fs} Hz "
                 f"(rec peak {pk:.1f} dBFS). Step 3 FIR + time-align unlocked.")
             if done is not None:
-                done({"label": f"IR {key[0]} pos {key[1] + 1}",
+                done({"label": f"IR {ch} pos {pos}",
                       "f": fgrid, "db": dbcurve})
         except Exception as e:
             log(f"⚠ Measurement failed: {e}")
 
-    # ---- non-blocking wrappers for the buttons (GUI stays alive) ----
+    # ---- non-blocking wrappers: snapshot widgets HERE, then thread ----
     def _run_in_background(self, fn, busy_msg):
-        """Run a measurement fn in a worker; log via queued signals."""
         import threading
+        from PySide6.QtCore import QObject, Signal, Qt
         if getattr(self, "_measuring", False):
-            self.log.appendPlainText("• Already measuring — wait for it to finish.")
+            self.log.appendPlainText("• Already measuring — wait for it.")
             return
         self._measuring = True
         for b in (self.btn_level, self.btn_measure):
             b.setEnabled(False)
-        old = self.m_hint.text()
         self.m_hint.setText("⏳ " + busy_msg)
-        from PySide6.QtCore import QObject, Signal, Qt
 
         class _Bridge(QObject):
             line = Signal(str)
@@ -225,16 +217,17 @@ class ImportPage(QWidget):
         bridge = _Bridge()
         bridge.line.connect(self.log.appendPlainText, Qt.QueuedConnection)
         bridge.curve.connect(self._on_bg_curve, Qt.QueuedConnection)
+        bridge.line.connect(self._bg_done_marker)
 
         def worker():
             try:
-                fn(log=bridge.line.emit, done=bridge.curve.emit)
+                fn(bridge.line.emit, bridge.curve.emit)
+            except Exception as e:  # never leave buttons stuck
+                bridge.line.emit(f"⚠ worker crashed: {e}")
             finally:
                 bridge.line.emit("• done")
 
-        bridge.line.connect(self._bg_done_marker)
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
+        threading.Thread(target=worker, daemon=True).start()
 
     def _bg_done_marker(self, line: str):
         if line == "• done" and getattr(self, "_measuring", False):
@@ -247,10 +240,21 @@ class ImportPage(QWidget):
         self._plot_meas(data["label"], data["f"], data["db"])
 
     def _btn_check_levels(self):
-        self._run_in_background(self._check_levels, "Checking levels (1 s)…")
+        inp = self.m_in.currentText()
+        self._run_in_background(
+            lambda log, done: self._check_levels_core(inp, log),
+            "Checking levels (1 s)…")
 
     def _btn_measure(self):
-        self._run_in_background(self._measure_once, "Measuring — sweep playing, stay quiet…")
+        params = {"out": self.m_out.currentText(),
+                  "inp": self.m_in.currentText(),
+                  "ch": self.m_ch.currentText(),
+                  "pos": int(self.m_pos.value()),
+                  "dur": int(self.m_dur.currentText().split()[0])}
+        sess = getattr(self.window(), "session", None)
+        self._run_in_background(
+            lambda log, done: self._measure_core(params, sess, log, done),
+            "Measuring — sweep playing, stay quiet…")
 
     def set_target(self, tune_page):
         self._tune = tune_page
