@@ -104,6 +104,17 @@ Date: 2026-10-09. Rule: no guessing file formats or syntax — verify or record.
   reboot required like official tool; --detach restores. Shell here is
   non-admin so attach is user-triggered from THEIR desktop session.
 
+## MCP SERVER (src/harmo_dsp/mcp_server/)
+- Example studied: KevinMeinon/rew-mcp-server (MIT) — ARCHITECTURE differs:
+  it proxies REW's REST API; ours calls harmo_dsp's own modules (no REW).
+  No code copied; only the tool-category checklist informed our list.
+- Framework: fastmcp 4.x (MIT, jlowin) — same framework the example
+  acknowledges. Official `mcp` 2.0.0 no longer ships mcp.server.fastmcp.
+- Safety: measure_sweep REFUSES without confirm=true (audio is a side
+  effect — the AI must ask the human first). set_eq writes only with
+  write=true; preview is the default. Headless: no Qt import anywhere.
+- Session state lives in the server process only (no GUI IPC in v0).
+
 ## TODO / GUESSES
 - REW menu names differ per version — parser is tolerant, verify with real exports.
 - .mdat format undocumented — NOT supported, message directs to .txt/.wav.
