@@ -66,6 +66,25 @@ def devices() -> tuple[list[str], list[str]]:
     return [], []
 
 
+def pick_measurement_mic(inputs: list[str]) -> str | None:
+    """Best measurement mic heuristic: calibrated UMIK-1 first, then any
+    USB mic, then any microphone. Returns the label or None."""
+    for kw in (("umik",), ("usb", "microphone"), ("usb",), ("microphone",)):
+        for lb in inputs:
+            if all(k in lb.lower() for k in kw):
+                return lb
+    return None
+
+
+def pick_measurement_out(outputs: list[str]) -> str | None:
+    """Best output heuristic: user rig = Realtek Digital, then digital/USB."""
+    for kw in (("digital", "realtek"), ("digital",), ("usb", "speakers")):
+        for lb in outputs:
+            if all(k in lb.lower() for k in kw):
+                return lb
+    return None
+
+
 def _idx(label: str) -> int | None:
     try:
         return int(label.split(":", 1)[0])

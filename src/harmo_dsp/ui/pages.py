@@ -91,8 +91,16 @@ class ImportPage(QWidget):
         mrow.addWidget(QLabel("Sweep:"))
         mrow.addWidget(self.m_dur)
         mform.addRow(mrow)
-        mform.addRow("Output:", self.m_out)
-        mform.addRow("Input (mic):", self.m_in)
+        orow = QHBoxLayout()
+        orow.addWidget(self.m_out, 1)
+        mform.addRow("Output:", orow)
+        irow = QHBoxLayout()
+        irow.addWidget(self.m_in, 1)
+        self.m_refresh = QPushButton("↻")
+        self.m_refresh.setToolTip("Re-scan audio devices — press this after plugging in / changing the mic (e.g. UMIK-1)")
+        self.m_refresh.clicked.connect(self._refresh_devices)
+        irow.addWidget(self.m_refresh)
+        mform.addRow("Input (mic):", irow)
         brow = QHBoxLayout()
         self.btn_level = QPushButton("🔊 Check levels")
         self.btn_level.setToolTip("Record 1 s, report peak/RMS + OK/too loud/too quiet")
@@ -114,7 +122,8 @@ class ImportPage(QWidget):
             lay.addWidget(mon)
 
     def _refresh_devices(self):
-        from ..io.audio import available, devices
+        from ..io.audio import (available, devices, pick_measurement_mic,
+                                pick_measurement_out)
         if not available():
             self.m_hint.setText("⚠ audio backend missing → measurement disabled. "
                                 "Install: pip install pyaudiowpatch (everything else works).")
@@ -136,11 +145,16 @@ class ImportPage(QWidget):
             return False
 
         # user rig heuristic: optical/USB audio first, generic digital/USB next
-        picked = (_preselect(self.m_out, ("digital", "realtek"))
-                  or _preselect(self.m_out, ("digital",))
-                  or _preselect(self.m_out, ("usb",)))
-        picked_in = (_preselect(self.m_in, ("usb", "microphone"))
-                     or _preselect(self.m_in, ("usb",)))
+        outp = pick_measurement_out(outs)
+        picked = False
+        if outp:
+            self.m_out.setCurrentText(outp)
+            picked = True
+        picked_in = False
+        mic = pick_measurement_mic(ins)
+        if mic:
+            self.m_in.setCurrentText(mic)
+            picked_in = True
         self.m_hint.setText(
             "Pre-selected: digital/USB devices"
             + ("" if picked else " (output guess failed — verify!)")
