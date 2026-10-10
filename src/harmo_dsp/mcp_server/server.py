@@ -19,6 +19,7 @@ def build_server():
     mcp.tool(tools.analyze_measurement)
     mcp.tool(tools.get_eq)
     mcp.tool(tools.set_eq)
+    mcp.tool(tools.auto_eq)
     mcp.tool(tools.verify_config)
     mcp.tool(tools.check_levels)
     mcp.tool(tools.measure_sweep)

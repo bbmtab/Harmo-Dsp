@@ -360,6 +360,82 @@ def save_graph(path: str, name: str = "") -> str:
         return _j({"error": f"{type(e).__name__}: {e}"})
 
 
+def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
+            max_bands: int = 10, max_boost: float = 6.0,
+            write: bool = False, name: str = "") -> str:
+    """Dirac-style auto-correction: flatten session measurement toward
+    the target (default: bass +3 dB below 80 Hz, mids/highs flat).
+
+    Cuts peaks; never boosts nulls; high Q only in bass. Optionally
+    writes the result to Equalizer APO (write=true).
+    """
+    import numpy as np
+    # 1) pick the curve: named measurement, latest measurement, or last IR
+    f = db = None
+    if SESSION["measurements"]:
+        key = name if name and name in SESSION["measurements"] \
+            else list(SESSION["measurements"])[-1]
+        m = SESSION["measurements"][key]
+        f, db = (np.asarray(m.frequencies, dtype=np.float64),
+                 np.asarray(m.spl, dtype=np.float64))
+    elif SESSION["irs"]:
+        from ..dsp.measure import ir_freq_response
+        last = list(SESSION["irs"].values())[-1]
+        f, db = ir_freq_response(last[1], int(last[0]))
+    if f is None:
+        return _j({"error": "no measurement in session — import_measurement "
+                           "or measure_sweep first"})
+    # 2) solve toward the target
+    from ..dsp.target import preset_curve
+    from ..dsp.solver import solve_peq, SolverParams
+    from ..dsp.peq import build_speakercorrect
+    tgt = preset_curve(f, target, corner_hz=corner_hz)
+    bands, rep = solve_peq(f, db, tgt, SolverParams(
+        max_bands=int(max_bands), max_boost=float(max_boost)), fs=48000.0)
+    SESSION["bands"] = bands
+    worst_boost = max((b.gain for b in bands), default=0.0)
+    SESSION["preamp"] = -worst_boost if worst_boost > 0 else 0.0
+    preview = build_speakercorrect(bands, SESSION["preamp"])
+    imp = (1.0 - rep["rms_after"] / rep["rms_before"]) \
+        if rep["rms_before"] > 1e-9 else 0.0
+    out = {"target": target, "corner_hz": corner_hz,
+           "bands_placed": rep["placed"],
+           "rms_before_db": round(rep["rms_before"], 2),
+           "rms_after_db": round(rep["rms_after"], 2),
+           "improvement_pct": round(imp * 100.0, 1),
+           "worst_boost_db": round(worst_boost, 1),
+           "preamp_set": SESSION["preamp"],
+           "bands": [b.__dict__ for b in bands],
+           "preview": preview if not write else None}
+    if not write:
+        out["written"] = False
+        out["note"] = "Preview only — re-call with write=true to apply."
+        return _j(out)
+    import os
+    from ..dsp.apo_setup import find_config_dir, build_patched_config
+    d = find_config_dir()
+    if not d:
+        out["error"] = "APO config dir not found"
+        return _j(out)
+    try:
+        with open(os.path.join(d, "speakercorrect.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(preview)
+        cfg = os.path.join(d, "config.txt")
+        cur = open(cfg, encoding="utf-8-sig", errors="replace").read() \
+            if os.path.isfile(cfg) else ""
+        new, _ = build_patched_config(cur, "speakercorrect.txt")
+        if new.strip() != cur.strip():
+            with open(cfg, "w", encoding="utf-8") as fh:
+                fh.write(new)
+        out["written"] = True
+        out["target_dir"] = d
+        return _j(out)
+    except OSError as e:
+        out["error"] = f"write failed ({e})"
+        return _j(out)
+
+
 def time_align() -> str:
     if len(SESSION["irs"]) < 2:
         return _j({"error": "need >=2 IRs (import .wav files or measure)",

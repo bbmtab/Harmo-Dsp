@@ -12,7 +12,7 @@ def test_target_flat_and_bass_shelf():
     f = np.array([20.0, 60.0, 150.0, 1000.0, 8000.0])
     flat = target_curve_db(f)
     assert np.abs(flat).max() < 1e-9
-    bass = target_curve_db(f, bass_db=6.0)
+    bass = target_curve_db(f, bass_db=6.0, corner_hz=150.0)
     assert abs(bass[0] - 6.0) < 0.01      # well below corner
     assert abs(bass[4]) < 0.01            # well above corner
     assert bass[2] < 3.1                  # at corner: half-ish
@@ -31,7 +31,7 @@ def test_preset_lookup_all_shapes():
     for name in PRESETS:
         y = preset_curve(f, name)
         assert len(y) == len(f)
-    assert "bass+3 tilt-0.5" in PRESETS
+    assert "bass+3@80" in PRESETS and "bass+3 tilt-0.5@80" in PRESETS
 
 
 def test_ring_buffer_wraparound():
