@@ -65,7 +65,7 @@ def _cascade_metrics(spk: np.ndarray, taps: np.ndarray, fs: float,
         return float(np.sqrt(np.mean((gd - np.median(gd)) ** 2)))
 
     pk = int(np.argmax(np.abs(taps)))
-    total = float(np.sum(np.asarray(taps, dtype=np.float64) ** 2)) + 1e-18)
+    total = float(np.sum(np.asarray(taps, dtype=np.float64) ** 2)) + 1e-18
     pre = float(np.sum(np.asarray(taps)[:max(pk - int(fs * 0.001), 0)]
                        .astype(np.float64) ** 2))
     return {
@@ -88,7 +88,7 @@ def step_metrics(taps: np.ndarray, fs: float) -> dict:
     final = s[-1] if abs(s[-1]) > 1e-12 else 1.0
     sn = s / final
     pk = int(np.argmax(np.abs(h)))
-    pre = sn[:pk]
+    pre = sn[:pk] if pk > 0 else np.zeros(1)
     return {
         "overshoot_pct": round(float(max(0.0, sn.max() - 1.0) * 100.0), 2),
         "preshoot_pct": round(float(max(0.0, -pre.min()) * 100.0), 2),
