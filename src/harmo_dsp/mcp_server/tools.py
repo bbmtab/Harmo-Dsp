@@ -506,6 +506,10 @@ def push_ir_to_rew(name: str = "", save_dir: str = "") -> str:
     return _j({"pushed": True, "wav": path, "rew_status": status,
                "note": "Look at REW: the IR is now a measurement there. "
                        "REW sees OUR sweep."})
+
+
+def time_align() -> str:
+    """Estimate inter-channel delays from session IR onsets (needs >=2)."""
     if len(SESSION["irs"]) < 2:
         return _j({"error": "need >=2 IRs (import .wav files or measure)",
                    "have": list(SESSION["irs"])})
