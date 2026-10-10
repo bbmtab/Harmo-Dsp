@@ -39,6 +39,10 @@ class MainWindow(QMainWindow):
         self.channels = ChannelSelector()
         self.channels.changed.connect(self._mode_note)
         bar.addWidget(self.channels)
+        from .monitor import OutputMeter
+        if OutputMeter is not None:
+            self.out_meter = OutputMeter()
+            bar.addWidget(self.out_meter)
         bar.addSeparator()
         self.btn_theme = QPushButton("🌗  Dark / Light")
         self.btn_theme.setToolTip("Switch between dark and light theme")

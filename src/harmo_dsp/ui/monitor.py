@@ -48,7 +48,8 @@ class SpectrumEngine:
 
 try:
     from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                                   QPushButton, QComboBox, QCheckBox)
+                                   QPushButton, QComboBox, QCheckBox,
+                                   QProgressBar)
     from PySide6.QtCore import QTimer, Qt
     import pyqtgraph as pg
 
@@ -159,6 +160,65 @@ try:
             except Exception:
                 pass
 
+    def peak_to_db(peak: float | None) -> float | None:
+        """Pure: OS peak 0..1 -> dBFS (None for silence/unavailable)."""
+        if peak is None or peak <= 0.0:
+            return None
+        import math
+        return 20.0 * math.log10(min(max(peak, 1e-9), 1.0))
+
+    class OutputMeter(QWidget):
+        """Always-on Peace-style output meter (no mic, OS session API).
+
+        Unavailable backend => dimmed bar + hint, never a crash
+        (service/headless sessions have no audio endpoint)."""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            lay = QHBoxLayout(self)
+            lay.setContentsMargins(6, 0, 6, 0)
+            icon = QLabel("🔊")
+            icon.setToolTip("Windows output level (all apps). Red = near clip.")
+            lay.addWidget(icon)
+            self.bar = QProgressBar()
+            self.bar.setRange(-600, 0)  # x10 dB: -60.0..0.0
+            self.bar.setValue(-600)
+            self.bar.setTextVisible(False)
+            self.bar.setFixedWidth(140)
+            self.bar.setFixedHeight(12)
+            lay.addWidget(self.bar)
+            self.db_label = QLabel("— dB")
+            self.db_label.setMinimumWidth(52)
+            lay.addWidget(self.db_label)
+            self._clip_until_ms = 0
+            self._available_seen = False
+            self.timer = QTimer(self)
+            self.timer.setInterval(120)
+            self.timer.timeout.connect(self._tick)
+            self.timer.start()
+            self.setToolTip("Output peak of the default playback device (like Peace's meter).")
+
+        def _tick(self):
+            import time
+            from ..io.meter import get_output_peak
+            db = peak_to_db(get_output_peak())
+            if db is None:
+                if not self._available_seen:
+                    self.db_label.setText("— dB")
+                    self.bar.setValue(-600)
+                return
+            self._available_seen = True
+            self.db_label.setText(f"{db:.1f} dB")
+            self.bar.setValue(int(max(-600.0, db * 10.0)))
+            now = time.monotonic() * 1000.0
+            if db > -0.1:
+                self._clip_until_ms = now + 2000.0
+            color = "#ff4d4d" if now < self._clip_until_ms else (
+                "#4da6ff" if db > -30 else "#3aa06a")
+            self.bar.setStyleSheet(
+                f"QProgressBar::chunk {{ background: {color}; }}")
+
 except ImportError:  # pyqtgraph/PySide missing (docs builds etc.)
     LiveSpectrum = None  # type: ignore
     PredictedCurve = None  # type: ignore
+    OutputMeter = None  # type: ignore
