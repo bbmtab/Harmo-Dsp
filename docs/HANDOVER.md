@@ -3,6 +3,72 @@
 > Read this first if you are the next model continuing this project.
 > Language: code/comments English; user speaks Indonesian (simple).
 
+## 0. Goal, verdict, and why Dirac was NOT reached
+
+**Goal (unchanged): Dirac-level PC speaker correction** — measure,
+auto-correct magnitude + phase, verify by ear, all open-source.
+
+**Verdict: not reached.** What runs today is an honest, well-tested
+*parametric-EQ workbench with Dirac-style tooling around it* — not a
+Dirac. The numbered reasons below are all verifiable in this repo;
+they are the exact deadlocks to break:
+
+1. **Measurement SNR ceiling.** Every real sweep peaked −9…−38 dBFS
+   with TOO QUIET verdicts (UMIK-1 needs louder playback; user never
+   raised it enough). All corrections were built on marginal data.
+   Dirac's foundation is clean multi-position measurements; ours were
+   single-position and noisy. No code fixes bad SNR — fix the LEVELS
+   first (`check_levels` must say OK, not "proceed anyway").
+2. **FIR never touched the live chain.** `dsp/fir.py` passes synthetic
+   acceptance (group-delay −50 %, decay, latency, multi-pos) but was
+   only ever previewed, never written + listened. Phase correction =
+   ~half the Dirac claim, 0 % verified on hardware.
+3. **No multi-position in product.** Brief criterion 3 (nulls that move
+   are ignored) exists only as synthetic test e. The guided flow stores
+   ONE IR per channel; averaging + consistency weighting never runs
+   on real data.
+4. **No per-channel correction.** One design drives L+R. `dsp/align.py`
+   exists but no UI flow collects L and R IRs separately.
+5. **Solver not wired to GUI.** `dsp/solver.py` works (greedy, tested)
+   but Step 3 "Calculate" is a dead button (see §9). Auto-EQ lives
+   only behind the MCP `auto_eq` tool.
+6. **Target page fully dead** (see §9) — no target flows anywhere.
+7. **Session tax.** Enormous turns burned on environment, not
+   acoustics: hidden-desktop launches, non-admin shell, S/PDIF
+   loopback glitches, PowerShell quoting, Unicode cp1252 crashes.
+   Budget for this; it will recur on this machine.
+8. **Structural gap.** Dirac = years of tuning + controlled protocol
+   + MIMO + verification culture. A greedy solver + 1 mic position
+   cannot match that by construction. The honest path is narrower:
+   ONE good measurement → ONE verified correction → ear-approved.
+   Stop adding features until that loop is green end-to-end.
+
+## 9. Label-only UI inventory (dead controls — do not demo these)
+
+Verified by grep for missing signal connections (`pages.py`):
+
+- Step 3 `btn_calc` "Calculate correction" (pages.py:407-409) — NO
+  handler. The solver it promises lives in `dsp/solver.py` + MCP
+  `auto_eq`; never connected. #1 priority if resuming.
+- Step 4 `btn_reopt` "Re-optimize around manual bands" (~:551) — NO
+  handler. Lock/respect logic does not exist anywhere.
+- Step 2 Target page, entire page: `preset` + `smooth` combos
+  (:368-374) are display-only (nothing reads them); graph is a
+  placeholder (:365). No target flows anywhere in the GUI.
+- Step 3 "Measured vs Predicted vs Target overlay" (:388) —
+  placeholder, never drawn.
+- Step 1 ImportPage graph: REAL since the graph feature (plots
+  imported/measured curves); empty-state text is honest.
+- Channel 2.0/2.1 selector: writes IDENTICAL files in v1 (verified:
+  `changed` signal was dead; now connected to an honest `_mode_note`
+  in main_window.py — keep that honesty, don't imply 2.1 routing).
+- RTA / meter / LiveSpectrum: real but OPT-IN by button press
+  (deliberate — auto-opening audio streams caused the S/PDIF noise
+  regression; see §2 + ASSUMPTIONS.md).
+- Everything else with a `.connect(` in the grep audit IS wired.
+  Re-run the audit after any UI change:
+  `Select-String pages.py -Pattern '\.connect\('` vs button defs.
+
 ## 1. One-paragraph state
 
 Harmo-Dsp = open-source Windows PC speaker correction (MIT core),
