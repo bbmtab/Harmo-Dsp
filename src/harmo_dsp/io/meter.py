@@ -157,3 +157,83 @@ def get_output_peak() -> float | None:
     except Exception:
         _close_backend()  # dead stream (device switch?) — re-init next poll
         return None
+
+
+class RingBuffer:
+    """Pure mono ring buffer (testable without any audio device)."""
+
+    def __init__(self, n: int):
+        import numpy as np
+        self._buf = np.zeros(max(64, int(n)), dtype=np.float32)
+        self._w = 0
+
+    def write(self, x) -> None:
+        import numpy as np
+        x = np.asarray(x, dtype=np.float32).ravel()
+        n = len(x)
+        if n == 0:
+            return
+        if n >= len(self._buf):
+            self._buf[:] = x[-len(self._buf):]
+            self._w = 0
+            return
+        end = self._w + n
+        if end <= len(self._buf):
+            self._buf[self._w:end] = x
+        else:
+            k = len(self._buf) - self._w
+            self._buf[self._w:] = x[:k]
+            self._buf[:end - len(self._buf)] = x[k:]
+        self._w = end % len(self._buf)
+
+    def recent(self, n: int):
+        """Latest n samples in chronological order."""
+        import numpy as np
+        n = min(int(n), len(self._buf))
+        idx = (self._w - n + np.arange(n)) % len(self._buf)
+        return self._buf[idx].astype(np.float64)
+
+
+class LoopbackCapture:
+    """Second loopback stream keeping a mono ring buffer for RTA FFT.
+
+    Same proven path as the meter (PyAudioWPatch loopback, full channel
+    count); shares nothing with the meter's stream — WASAPI shared mode
+    allows multiple clients.
+    """
+
+    def __init__(self, seconds: float = 2.0):
+        import pyaudiowpatch as pw
+        self.pa = pw.PyAudio()
+        lb = self.pa.get_default_wasapi_loopback()
+        self.fs = int(lb["defaultSampleRate"])
+        self.ch = int(lb["maxInputChannels"])
+        self.ring = RingBuffer(int(self.fs * seconds))
+
+        def cb(in_data, frames, _t, _st):
+            import numpy as np
+            x = np.frombuffer(in_data, dtype=np.float32)
+            if self.ch > 1:
+                x = x.reshape(-1, self.ch).mean(axis=1)
+            self.ring.write(x)
+            return (in_data, pw.paContinue)
+
+        self.stream = self.pa.open(
+            format=pw.paFloat32, channels=self.ch, rate=self.fs,
+            input=True, input_device_index=int(lb["index"]),
+            stream_callback=cb)
+        self.stream.start_stream()
+
+    def recent(self, n: int):
+        return self.ring.recent(n)
+
+    def close(self):
+        try:
+            self.stream.stop_stream()
+            self.stream.close()
+        except Exception:
+            pass
+        try:
+            self.pa.terminate()
+        except Exception:
+            pass

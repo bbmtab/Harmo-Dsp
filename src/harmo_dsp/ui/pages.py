@@ -483,6 +483,10 @@ class FineTunePage(QWidget):
         row.addWidget(self.btn_ab)
         row.addWidget(self.btn_reopt)
         lay.addLayout(row)
+        from .monitor import RtaPanel
+        self.rta = RtaPanel() if RtaPanel is not None else None
+        if self.rta is not None:
+            lay.addWidget(self.rta)
         box = QGroupBox("💾 Equalizer APO preview (auto-updates)")
         form = QFormLayout(box)
         self.apo_preview = QPlainTextEdit()
@@ -490,11 +494,6 @@ class FineTunePage(QWidget):
         self.apo_preview.setMaximumHeight(70)
         self.apo_preview.setToolTip("Paste this GraphicEQ line into Equalizer APO config")
         form.addRow(self.apo_preview)
-        from .monitor import PredictedCurve
-        self.pred_curve = PredictedCurve() if PredictedCurve is not None else None
-        if self.pred_curve is not None:
-            self.pred_curve.setToolTip("Green = combined filter response of all 31 bands (real biquad math). Flat line = bypass.")
-            form.addRow(self.pred_curve)
         lay.addWidget(box)
         self.geq.changed.connect(self._eq_changed)
         self.btn_ab.toggled.connect(self._refresh_preview)
@@ -756,8 +755,8 @@ class FineTunePage(QWidget):
         from ..dsp.peq import build_speakercorrect
         if self.btn_ab.isChecked():
             self.apo_preview.setPlainText("# bypassed — A/B ON, no correction applied")
-            if self.pred_curve is not None:
-                self.pred_curve.set_bands([])
+            if self.rta is not None:
+                self.rta.set_chain([], 0.0)
             if not self.btn_live.isChecked() and not getattr(self, "_bypass_hinted", False):
                 self._bypass_hinted = True
                 win = self.window()
@@ -771,8 +770,8 @@ class FineTunePage(QWidget):
         txt = build_speakercorrect(bands, self.preamp.value())
         self.apo_preview.setPlainText(txt)
         self.apo_preview.setToolTip("Full speakercorrect.txt preview (Channel L/R blocks). Export writes this file.")
-        if self.pred_curve is not None:
-            self.pred_curve.set_bands(bands, self.preamp.value())
+        if self.rta is not None:
+            self.rta.set_chain(bands, self.preamp.value())
         self.schedule_live_write()  # single scheduling point: sliders, preamp, bypass, presets
 
 
@@ -842,9 +841,13 @@ class ExportPage(QWidget):
         self.btn_conv_clear = QPushButton("✖ Off")
         self.btn_conv_clear.setToolTip("Turn convolution OFF: clears this field AND forgets generated FIR files (filters keep working)")
         self.btn_conv_clear.clicked.connect(self._clear_conv)
+        self.conv_on = QCheckBox("ON")
+        self.conv_on.setChecked(True)
+        self.conv_on.setToolTip("SWITCH: keep the rePhase/FIR file loaded but mute it for A/B (path is kept, line is not written).")
         crow.addWidget(self.conv_edit, 1)
         crow.addWidget(self.btn_conv)
         crow.addWidget(self.btn_conv_clear)
+        crow.addWidget(self.conv_on)
         form.addRow("Convolution:", crow)
         self.custom = QPlainTextEdit()
         self.custom.setPlaceholderText("Advanced verbatim lines (Copy:, VST, …) appended at end. Empty = none.")
@@ -1110,7 +1113,7 @@ class ExportPage(QWidget):
             sess = getattr(self.window(), "session", {}) or {}
             if sess.get("fir_wav"):
                 raw = sess["fir_wav"]
-        if raw:
+        if raw and self.conv_on.isChecked():
             first = raw.split(";")[0].strip()
             try:
                 from scipy.io.wavfile import read as _wr
@@ -1119,15 +1122,16 @@ class ExportPage(QWidget):
             except Exception:
                 conv[48000] = first  # assumed rate; Verify warns if device differs
         conv_per_ch: dict[str, dict[int, str]] = {}
-        sess = getattr(self.window(), "session", {}) or {}
-        for ch, path in (sess.get("fir", {}) or {}).items():
-            if ch in ("L", "R"):
-                try:
-                    from scipy.io.wavfile import read as _wr2
-                    _fs2, _ = _wr2(path)
-                    conv_per_ch[ch] = {int(_fs2): path}
-                except Exception:
-                    conv_per_ch[ch] = {48000: path}
+        if self.conv_on.isChecked():
+            sess = getattr(self.window(), "session", {}) or {}
+            for ch, path in (sess.get("fir", {}) or {}).items():
+                if ch in ("L", "R"):
+                    try:
+                        from scipy.io.wavfile import read as _wr2
+                        _fs2, _ = _wr2(path)
+                        conv_per_ch[ch] = {int(_fs2): path}
+                    except Exception:
+                        conv_per_ch[ch] = {48000: path}
         return ApoOutput(
             preamp_db=preamp, device_pattern=self.device_edit.text().strip(),
             bands=bands, graphic_l=gl, graphic_r=gr,

@@ -167,6 +167,126 @@ try:
         import math
         return 20.0 * math.log10(min(max(peak, 1e-9), 1.0))
 
+    class RtaPanel(QWidget):
+        """Dirac-style live loop: RTA of what plays + target guide +
+        predicted EQ overlay — flatten a region by eye, Live applies it.
+
+        Loopback source (no mic needed): the proven PyAudioWPatch path.
+        """
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            lay = QVBoxLayout(self)
+            lay.setContentsMargins(0, 0, 0, 0)
+            top = QHBoxLayout()
+            self.btn_go = QPushButton("▶ RTA")
+            self.btn_go.setCheckable(True)
+            self.btn_go.setToolTip("Start/stop the real-time analyzer of whatever is playing "
+                                   "(loopback — no mic). Drag EQ while watching.")
+            self.btn_go.toggled.connect(self._toggle)
+            self.target = QComboBox()
+            from ..dsp.target import PRESETS
+            for k in PRESETS:
+                self.target.addItem(k, k)
+            self.target.setToolTip("Target guide line (visual only until the auto-solver ships).")
+            self.target.currentIndexChanged.connect(self._redraw_target)
+            self.hold = QCheckBox("hold")
+            self.hold.setToolTip("Peak hold — find offending bumps (e.g. 50–60 Hz)")
+            self.note = QLabel("")
+            self.note.setStyleSheet("font-size: 11px; opacity: 0.8;")
+            top.addWidget(self.btn_go)
+            top.addWidget(QLabel("target:"))
+            top.addWidget(self.target)
+            top.addWidget(self.hold)
+            top.addWidget(self.note, 1)
+            lay.addLayout(top)
+            self.plot = pg.PlotWidget()
+            self.plot.setLogMode(x=True, y=False)
+            self.plot.setLabel("left", "dBFS")
+            self.plot.setLabel("bottom", "Hz")
+            self.plot.setMinimumHeight(200)
+            self.plot.addLine(y=0, pen=pg.mkPen("#555555", width=1))
+            self.c_live = self.plot.plot(pen=pg.mkPen("#4da6ff", width=2))
+            self.c_hold = self.plot.plot(pen=pg.mkPen("#ff6b6b", width=1,
+                                                     style=Qt.DashLine))
+            self.c_target = self.plot.plot(pen=pg.mkPen("#ffd21e", width=2,
+                                                        style=Qt.DashLine))
+            self.c_pred = self.plot.plot(pen=pg.mkPen("#00cc66", width=2))
+            lay.addWidget(self.plot)
+            self._capture = None
+            self._eng = SpectrumEngine(fs=48000, n_fft=8192)
+            self._bands = []
+            self._preamp = 0.0
+            self.timer = QTimer(self)
+            self.timer.setInterval(150)
+            self.timer.timeout.connect(self._tick)
+            self._redraw_target()
+
+        # --- wiring from FineTune ---
+        def set_chain(self, bands, preamp: float) -> None:
+            self._bands = list(bands)
+            self._preamp = float(preamp)
+            if not self.btn_go.isChecked():
+                return
+            self._draw_pred()
+
+        # --- internals ---
+        def _toggle(self, on: bool):
+            if on:
+                try:
+                    from ..io.meter import LoopbackCapture
+                    self._capture = LoopbackCapture()
+                    self._eng.fs = self._capture.fs
+                    self._eng.peak_hold = None
+                    self._eng = SpectrumEngine(fs=self._capture.fs,
+                                               n_fft=16384)
+                    self.btn_go.setText("■ RTA")
+                    self.note.setText("Watching what plays — adjust EQ live.")
+                    self.timer.start()
+                    self._draw_pred()
+                except Exception as e:
+                    self.btn_go.setChecked(False)
+                    self.note.setText(f"RTA unavailable: {e}")
+            else:
+                self.timer.stop()
+                self.btn_go.setText("▶ RTA")
+                self.note.setText("RTA off.")
+                if self._capture is not None:
+                    self._capture.close()
+                    self._capture = None
+
+        def _redraw_target(self):
+            from ..dsp.target import preset_curve
+            self.c_target.setData(LOG_GRID, preset_curve(LOG_GRID,
+                                                         self.target.currentData()))
+
+        def _draw_pred(self):
+            from ..dsp.clip_guard import chain_response_db
+            try:
+                y = chain_response_db(self._bands, LOG_GRID) + self._preamp
+                self.c_pred.setData(LOG_GRID, y)
+            except Exception:
+                pass
+
+        def _tick(self):
+            if self._capture is None:
+                return
+            n = self._eng.n_fft
+            x = self._capture.recent(n)
+            if len(x) < 256:
+                return
+            self._eng.feed(x)
+            f, db = self._eng.spectrum_db()
+            self.c_live.setData(f, db)
+            self.plot.setYRange(max(-90, float(np.min(db)) - 5),
+                                 min(0, float(np.max(db)) + 5), padding=0)
+            if self.hold.isChecked():
+                if self._eng.peak_hold is not None:
+                    self.c_hold.setData(f, self._eng.peak_hold)
+            else:
+                self.c_hold.clear()
+                self._eng.peak_hold = None
+
     class OutputMeter(QWidget):
         """Always-on Peace-style output meter (no mic, OS session API).
 
