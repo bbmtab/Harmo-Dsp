@@ -361,14 +361,16 @@ def save_graph(path: str, name: str = "") -> str:
 
 
 def auto_eq(target: str = "bass+3@80", corner_hz: float = 80.0,
-            max_bands: int = 10, max_boost: float = 6.0,
+            max_bands: int = 10, max_boost: float = 0.0,
             max_cut: float = 8.0, fit_lo: float = 30.0,
             fit_hi: float = 8000.0,
             write: bool = False, listen_approved: bool = False,
             fir_wav: str = "", name: str = "") -> str:
-    """Dirac-style correction: PEQ toward target + optional phase-only FIR
+    """Dirac-style auto-correction: PEQ toward target + optional phase-only FIR
     (fir_wav from design_fir) in ONE write (bands + Convolution + Include).
-    fit_lo/fit_hi restrict WHERE it corrects. Write requires >=15%
+    fit_lo/fit_hi restrict WHERE it corrects. CUTS ONLY by policy
+    (max_boost=0): never lift anything — dips/nulls are room artifacts,
+    boosting them wastes power and risks clipping. Write requires >=15%
     improvement AND listen_approved=true.
     """
     import numpy as np
