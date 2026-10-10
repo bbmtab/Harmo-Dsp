@@ -21,6 +21,7 @@ test = [
 ]
 measure = [
   "sounddevice",
+  "pyaudiowpatch",
 ]
 [build-system]
 requires = ["setuptools>=61"]

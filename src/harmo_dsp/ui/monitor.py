@@ -201,13 +201,20 @@ try:
         def _tick(self):
             import time
             from ..io.meter import get_output_peak
-            db = peak_to_db(get_output_peak())
-            if db is None:
+            peak = get_output_peak()
+            if peak is None:
                 if not self._available_seen:
                     self.db_label.setText("— dB")
                     self.bar.setValue(-600)
                 return
             self._available_seen = True
+            db = peak_to_db(peak)
+            if db is None:  # alive but silence
+                self.db_label.setText("silent")
+                self.bar.setValue(-600)
+                self.bar.setStyleSheet(
+                    "QProgressBar::chunk { background: #3a5a3a; }")
+                return
             self.db_label.setText(f"{db:.1f} dB")
             self.bar.setValue(int(max(-600.0, db * 10.0)))
             now = time.monotonic() * 1000.0

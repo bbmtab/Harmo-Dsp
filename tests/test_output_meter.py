@@ -22,11 +22,14 @@ def test_output_meter_none_and_fake_peak(monkeypatch):
     monkeypatch.setattr(M, "get_output_peak", lambda: None)
     m._tick()
     assert m.db_label.text() == "— dB"  # unavailable => dim, no crash
+    monkeypatch.setattr(M, "get_output_peak", lambda: 0.0)  # alive, silent
+    m._tick()
+    assert m.db_label.text() == "silent"
+    assert m._available_seen
     monkeypatch.setattr(M, "get_output_peak", lambda: 0.5)
     m._tick()
     assert m.db_label.text() == "-6.0 dB"
     assert m.bar.value() == -60
-    assert m._available_seen
     monkeypatch.setattr(M, "get_output_peak", lambda: 1.0)  # clip
     m._tick()
     assert m.db_label.text() == "0.0 dB"
